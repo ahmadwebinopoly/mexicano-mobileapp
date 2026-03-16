@@ -17,7 +17,7 @@ module.exports = {
     jsEngine: 'hermes',
     scheme: 'mexicanoapp',
     splash: {
-      image: './assets/splash-icon.png',
+      image: './assets/Splash.png',
       resizeMode: 'contain',
       backgroundColor: '#ffffff',
     },

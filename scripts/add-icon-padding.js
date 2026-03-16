@@ -13,7 +13,7 @@ const ASSETS_DIR = path.join(__dirname, '..', 'assets');
 const INPUT = path.join(ASSETS_DIR, 'Masterlogo.png');
 const OUTPUT = path.join(ASSETS_DIR, 'Masterlogo-icon.png');
 const SIZE = 1024;
-const SAFE_SCALE = 0.62; // logo at 62% of canvas = ~19% padding each side (Android safe zone)
+const SAFE_SCALE = 0.62; // logo at 62% of canvas = ~19% padding each side (Android safe zone)L
 async function main() {
   const logoSize = Math.round(SIZE * SAFE_SCALE);
   const offset = Math.round((SIZE - logoSize) / 2);
