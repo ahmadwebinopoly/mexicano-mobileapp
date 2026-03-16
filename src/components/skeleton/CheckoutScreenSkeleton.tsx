@@ -26,7 +26,7 @@ export function CheckoutScreenSkeleton() {
         </View>
       ))}
 
-      <SkeletonBox width={120} height={14} style={[styles.sectionTitle, { marginTop: 24 }]} />
+      <SkeletonBox width={120} height={14} style={[styles.sectionTitle, styles.sectionTitleTop]} />
     </View>
   );
 }
@@ -38,6 +38,9 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     marginBottom: 12,
+  },
+  sectionTitleTop: {
+    marginTop: 24,
   },
   cartRow: {
     flexDirection: 'row',

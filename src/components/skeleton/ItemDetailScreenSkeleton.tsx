@@ -15,7 +15,7 @@ export function ItemDetailScreenSkeleton({ skipImage = false }: ItemDetailScreen
     <View style={styles.content}>
       {!skipImage && (
         <View style={styles.imageWrap}>
-          <SkeletonBox width="100%" height="100%" borderRadius={16} style={StyleSheet.absoluteFill} />
+          <SkeletonBox width="100%" height="100%" borderRadius={16} style={styles.absoluteFill} />
         </View>
       )}
 
@@ -58,6 +58,13 @@ export function ItemDetailScreenSkeleton({ skipImage = false }: ItemDetailScreen
 const styles = StyleSheet.create({
   content: {
     paddingBottom: 24,
+  },
+  absoluteFill: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
   },
   imageWrap: {
     marginHorizontal: IMAGE_HORIZONTAL_PADDING,

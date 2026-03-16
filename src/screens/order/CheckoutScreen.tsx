@@ -243,8 +243,6 @@ export default function CheckoutScreen() {
         notes: notes.trim() || undefined,
         paymentMethod: payMethod,
         paymentStatus: payStatus,
-        payment_method: payMethod,
-        payment_status: payStatus,
         paymentId: stripePaymentIntentId,
       });
 

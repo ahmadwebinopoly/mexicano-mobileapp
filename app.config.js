@@ -1,11 +1,5 @@
-// Read projectId from eas.json (required for push notifications)
-let projectId;
-try {
-  const eas = require('./eas.json');
-  projectId = eas?.projectId;
-} catch {
-  projectId = null;
-}
+// Project ID for EAS / push notifications (required for builds and notifications)
+const EAS_PROJECT_ID = 'f2eabc34-f5c5-4951-b986-f073deb5d948';
 
 module.exports = {
   expo: {
@@ -28,6 +22,7 @@ module.exports = {
       supportsTablet: true,
     },
     android: {
+      package: 'com.mexicanoapp',
       adaptiveIcon: {
         foregroundImage: './assets/Masterlogo.png',
         backgroundColor: '#0B5D3C',
@@ -41,7 +36,7 @@ module.exports = {
     extra: {
       apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL || null,
       eas: {
-        projectId: projectId || null,
+        projectId: EAS_PROJECT_ID,
       },
     },
   },

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, StyleSheet, Animated, ViewStyle } from 'react-native';
+import { StyleSheet, Animated, ViewStyle, StyleProp } from 'react-native';
 
 const SKELETON_COLOR = 'rgba(255,255,255,0.12)';
 
@@ -7,7 +7,7 @@ interface SkeletonBoxProps {
   width?: number | string;
   height?: number | string;
   borderRadius?: number;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   pulse?: boolean;
 }
 
@@ -41,7 +41,7 @@ export function SkeletonBox({
           height: height ?? 20,
           borderRadius,
           opacity: pulse ? opacity : 1,
-        },
+        } as ViewStyle,
         style,
       ]}
     />

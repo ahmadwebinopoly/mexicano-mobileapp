@@ -25,7 +25,7 @@ export function MenuScreenSkeleton() {
               width="100%"
               height={PRODUCT_IMAGE_HEIGHT}
               borderRadius={0}
-              style={StyleSheet.absoluteFill}
+              style={styles.absoluteFill}
             />
           </View>
           <View style={styles.productInfo}>
@@ -57,6 +57,13 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(229,185,72,0.3)',
+  },
+  absoluteFill: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
   },
   productImageWrap: {
     height: PRODUCT_IMAGE_HEIGHT,

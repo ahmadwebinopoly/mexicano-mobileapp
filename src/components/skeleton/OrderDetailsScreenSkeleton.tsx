@@ -16,7 +16,7 @@ export function OrderDetailsScreenSkeleton() {
     <View style={styles.content}>
       <View style={styles.imageContainer}>
         <View style={styles.imageWrap}>
-          <SkeletonBox width="100%" height="100%" borderRadius={16} style={StyleSheet.absoluteFill} />
+          <SkeletonBox width="100%" height="100%" borderRadius={16} style={styles.absoluteFill} />
         </View>
       </View>
 
@@ -59,6 +59,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: HORIZONTAL_PADDING,
     paddingTop: 12,
     paddingBottom: 16,
+  },
+  absoluteFill: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
   },
   imageWrap: {
     width: '100%',
