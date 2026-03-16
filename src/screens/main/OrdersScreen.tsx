@@ -245,7 +245,7 @@ export default function OrdersScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color={BG_DARK} />
+          <Ionicons name="arrow-back" size={20} color={BG_DARK} />
         </Pressable>
         <Text style={styles.headerTitle}>My Orders</Text>
         <View style={styles.headerSpacer} />
@@ -325,25 +325,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: HORIZONTAL_PADDING,
-    paddingVertical: 12,
+    paddingVertical: 6,
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: GOLD,
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerTitle: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
     color: TEXT_WHITE,
     textAlign: 'center',
   },
   headerSpacer: {
-    width: 40,
+    width: 32,
   },
   tabBar: {
     flexDirection: 'row',

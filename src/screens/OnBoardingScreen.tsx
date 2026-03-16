@@ -577,10 +577,11 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
         animationType="fade"
         onRequestClose={() => setShowDeliveryUnavailableModal(false)}
       >
-        <Pressable
-          style={styles.modalBackdrop}
-          onPress={() => setShowDeliveryUnavailableModal(false)}
-        >
+        <SafeAreaView style={styles.modalBackdrop} edges={['top', 'bottom', 'left', 'right']}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setShowDeliveryUnavailableModal(false)}
+          />
           <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
             <MaterialIcons name="delivery-dining" size={44} color={BUTTON_BG} style={styles.modalIcon} />
             <Text style={styles.modalTitle}>Delivery unavailable</Text>
@@ -592,7 +593,7 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
               <Text style={styles.modalButtonText}>OK</Text>
             </Pressable>
           </Pressable>
-        </Pressable>
+        </SafeAreaView>
       </Modal>
 
       {/* Login required modal for delivery */}
@@ -602,10 +603,11 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
         animationType="fade"
         onRequestClose={() => setShowLoginRequiredModal(false)}
       >
-        <Pressable
-          style={styles.modalBackdrop}
-          onPress={() => setShowLoginRequiredModal(false)}
-        >
+        <SafeAreaView style={styles.modalBackdrop} edges={['top', 'bottom', 'left', 'right']}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setShowLoginRequiredModal(false)}
+          />
           <Pressable style={styles.loginModalCard} onPress={(e) => e.stopPropagation()}>
             <View style={styles.loginModalIconWrap}>
               <Ionicons name="person-circle-outline" size={48} color={BUTTON_BG} />
@@ -633,7 +635,7 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
               </Pressable>
             </View>
           </Pressable>
-        </Pressable>
+        </SafeAreaView>
       </Modal>
     </SafeAreaView>
   );

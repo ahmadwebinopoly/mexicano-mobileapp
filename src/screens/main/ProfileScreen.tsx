@@ -191,10 +191,11 @@ export default function ProfileScreen() {
         animationType="fade"
         onRequestClose={() => setLanguageModalVisible(false)}
       >
-        <Pressable
-          style={styles.languageModalBackdrop}
-          onPress={() => setLanguageModalVisible(false)}
-        >
+        <SafeAreaView style={styles.languageModalBackdrop} edges={['top', 'bottom', 'left', 'right']}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setLanguageModalVisible(false)}
+          />
           <Pressable style={styles.languageModalCard} onPress={(e) => e.stopPropagation()}>
             <View style={styles.languageModalIconWrap}>
               <Ionicons name="language-outline" size={40} color={GOLD} />
@@ -222,7 +223,7 @@ export default function ProfileScreen() {
               <Text style={styles.languageModalDoneText}>Done</Text>
             </Pressable>
           </Pressable>
-        </Pressable>
+        </SafeAreaView>
       </Modal>
 
       {toast ? (

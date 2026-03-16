@@ -109,7 +109,7 @@ export default function ItemDetailScreen() {
 
   if (!item) {
     return (
-      <SafeAreaView style={[styles.container, styles.centered]} edges={['top', 'bottom']}>
+      <SafeAreaView style={[styles.container, styles.centered]} edges={['top', 'bottom', 'left', 'right']}>
         <Text style={styles.errorText}>No item data</Text>
         <Pressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={BG_DARK} />
@@ -120,7 +120,7 @@ export default function ItemDetailScreen() {
 
   if (showSkeleton) {
     return (
-      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
         <View style={styles.imageContainer}>
           <View style={styles.imageWrap}>
             <View style={styles.heroImageSkeleton} />
@@ -141,7 +141,7 @@ export default function ItemDetailScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}

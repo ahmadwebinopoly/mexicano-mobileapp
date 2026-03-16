@@ -159,7 +159,7 @@ export default function MapScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
       <View style={styles.mapContainer}>
         <MapView
           style={styles.map}

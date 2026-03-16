@@ -392,7 +392,7 @@ export default function AddressScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
       {/* Header */}
       <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={() => navigation.goBack()}>
@@ -433,12 +433,13 @@ export default function AddressScreen() {
         animationType="slide"
         onRequestClose={closeAddModal}
       >
-        <KeyboardAvoidingView
-          style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <Pressable style={styles.modalBackdrop} onPress={closeAddModal} />
-          <View style={styles.modalContent}>
+        <SafeAreaView style={styles.modalOverlay} edges={['top', 'bottom', 'left', 'right']}>
+          <KeyboardAvoidingView
+            style={styles.modalOverlayInner}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <Pressable style={styles.modalBackdrop} onPress={closeAddModal} />
+            <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Add New Address</Text>
               <Pressable onPress={closeAddModal}>
@@ -568,7 +569,8 @@ export default function AddressScreen() {
               )}
             </Pressable>
           </View>
-        </KeyboardAvoidingView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
       </Modal>
 
       {/* Edit Address Modal */}
@@ -578,12 +580,13 @@ export default function AddressScreen() {
         animationType="slide"
         onRequestClose={closeEditModal}
       >
-        <KeyboardAvoidingView
-          style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <Pressable style={styles.modalBackdrop} onPress={closeEditModal} />
-          <View style={styles.modalContent}>
+        <SafeAreaView style={styles.modalOverlay} edges={['top', 'bottom', 'left', 'right']}>
+          <KeyboardAvoidingView
+            style={styles.modalOverlayInner}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <Pressable style={styles.modalBackdrop} onPress={closeEditModal} />
+            <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Edit Address</Text>
               <Pressable onPress={closeEditModal}>
@@ -693,7 +696,8 @@ export default function AddressScreen() {
               )}
             </Pressable>
           </View>
-        </KeyboardAvoidingView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
       </Modal>
     </SafeAreaView>
   );
@@ -878,6 +882,10 @@ const styles = StyleSheet.create({
   },
   // Modal styles
   modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  modalOverlayInner: {
     flex: 1,
     justifyContent: 'flex-end',
   },

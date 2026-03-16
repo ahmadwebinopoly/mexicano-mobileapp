@@ -74,9 +74,6 @@ const ProductCard = memo(function ProductCard({ item, onPress }: ProductCardProp
             <MaterialIcons name="image-not-supported" size={40} color="rgba(255,255,255,0.35)" />
           </View>
         )}
-        <Pressable style={styles.heartButton}>
-          <Ionicons name="heart" size={16} color={BG_DARK} />
-        </Pressable>
       </View>
       <View style={styles.productInfo}>
         <View style={styles.productTopRow}>
@@ -94,9 +91,6 @@ const ProductCard = memo(function ProductCard({ item, onPress }: ProductCardProp
             <Text style={styles.metaText} numberOfLines={1}>{item.time}</Text>
           </View>
           <View style={styles.metaSpacer} />
-          <Pressable style={styles.addButton}>
-            <Text style={styles.addButtonText}>+</Text>
-          </Pressable>
         </View>
       </View>
     </Pressable>
@@ -197,7 +191,7 @@ export default function MenuScreen() {
   const keyExtractor = useCallback((item: MenuProduct) => item.id, []);
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
       {/* Header: compact, search only (same look as DiscoverScreen) */}
       <View style={styles.header}>
         <View style={styles.searchBar}>
@@ -333,17 +327,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  heartButton: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: GOLD,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   productInfo: {
     padding: 16,
   },
@@ -390,19 +373,6 @@ const styles = StyleSheet.create({
   },
   metaSpacer: {
     flex: 1,
-  },
-  addButton: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: GOLD_MUTED,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  addButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#000000',
   },
   bottomSpacer: {
     height: 96,

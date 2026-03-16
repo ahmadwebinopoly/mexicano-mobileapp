@@ -2,6 +2,7 @@ import 'react-native-gesture-handler';
 import React, { useEffect } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useFonts } from '@expo-google-fonts/montserrat';
 import { Montserrat_600SemiBold, Montserrat_700Bold } from '@expo-google-fonts/montserrat';
 import RootNavigator from './src/navigation/RootNavigator';
@@ -41,10 +42,10 @@ export default function App() {
   }
 
   return (
-    <>
+    <SafeAreaProvider>
       <RootNavigator />
       <StatusBar style="light" />
-    </>
+    </SafeAreaProvider>
   );
 }
 

@@ -132,6 +132,7 @@ export default function DiscoverScreen() {
   const stickyTabsScrollRef = useRef<ScrollView>(null);
   const [showStickyTabs, setShowStickyTabs] = useState(false);
   const prevStickyRef = useRef(false);
+  const [headerHeight, setHeaderHeight] = useState(0);
 
   const menuSections = React.useMemo(
     () => buildMenuSections(categories, allItems),
@@ -295,9 +296,14 @@ export default function DiscoverScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
       {/* Header */}
-      <View style={styles.header}>
+      <View
+        style={styles.header}
+        onLayout={(e) => {
+          setHeaderHeight(e.nativeEvent.layout.height);
+        }}
+      >
         <Pressable style={styles.headerIconBtn}>
           <MaterialIcons name="home" size={20} color={BG_DARK} />
         </Pressable>
@@ -324,7 +330,7 @@ export default function DiscoverScreen() {
 
       {/* Sticky tabs – visible when scrolled past banner + search */}
       {showStickyTabs && categories.length > 0 ? (
-        <View style={styles.stickyTabsWrap}>
+        <View style={[styles.stickyTabsWrap, { top: headerHeight }]}>
           {renderStickyTabs()}
         </View>
       ) : null}
@@ -333,7 +339,10 @@ export default function DiscoverScreen() {
       <SectionList
         ref={mainListRef}
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          showStickyTabs && { paddingTop: TABS_WRAP_HEIGHT },
+        ]}
         sections={loading ? [] : menuSections.map((section) => ({ title: section.title, data: section.items }))}
         keyExtractor={(item) => item.id}
         renderSectionHeader={({ section }) => (
@@ -546,7 +555,6 @@ const styles = StyleSheet.create({
   },
   stickyTabsWrap: {
     position: 'absolute',
-    top: 68,
     left: 0,
     right: 0,
     backgroundColor: BG_DARK,
