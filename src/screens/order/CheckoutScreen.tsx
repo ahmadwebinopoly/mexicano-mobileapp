@@ -17,6 +17,7 @@ import { CardField, confirmPayment, initStripe, type CardFieldInput } from '@str
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { placeOrder } from '../../api/orders';
+import { getNetworkErrorMessage } from '../../api/apiConfig';
 import { useCart, type CartItem } from '../../contexts/CartContext';
 import { getCurrentUser } from '../../api/profile';
 import { getAddress } from '../../api/saveadresss';
@@ -260,7 +261,7 @@ export default function CheckoutScreen() {
         index: 1,
       });
     } catch (err) {
-      Alert.alert('Order failed', err instanceof Error ? err.message : 'Could not place order.');
+      Alert.alert('Order failed', getNetworkErrorMessage(err));
     } finally {
       setPlacing(false);
     }

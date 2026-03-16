@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { getMenuItems, getMenuCategories, type MenuItem as ApiMenuItem, type MenuCategory } from '../../api/discoverScreen';
+import { getNetworkErrorMessage } from '../../api/apiConfig';
 import { navigateToCart } from '../../navigation/rootNavigationRef';
 import { DiscoverScreenSkeleton } from '../../components/skeleton';
 import { getAddress } from '../../api/saveadresss';
@@ -151,7 +152,7 @@ export default function DiscoverScreen() {
           setActiveTabIndex(defaultCategoryIndex(cats));
         }
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load menu');
+        if (!cancelled) setError(getNetworkErrorMessage(e));
       } finally {
         if (!cancelled) setLoading(false);
       }

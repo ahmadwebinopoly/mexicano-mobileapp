@@ -13,6 +13,7 @@ import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { ItemDetailParamItem } from './ItemDetailScreen';
 import { getMenuItems, getCachedMenuItems, type MenuItem as ApiMenuItem } from '../../api/Menu';
+import { getNetworkErrorMessage } from '../../api/apiConfig';
 import { MenuScreenSkeleton } from '../../components/skeleton/MenuScreenSkeleton';
 
 type Nav = { navigate: (name: string) => void; getParent: () => { navigate: (name: string, params: object) => void } | null };
@@ -167,7 +168,7 @@ export default function MenuScreen() {
         setMenuProducts(items.map(mapApiItemToMenuProduct));
       } catch (e) {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : 'Failed to load menu');
+          setError(getNetworkErrorMessage(e));
         }
       } finally {
         if (!cancelled) setLoading(false);

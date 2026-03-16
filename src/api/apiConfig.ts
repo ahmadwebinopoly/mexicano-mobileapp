@@ -4,16 +4,13 @@
  *
  * Resolution order:
  * 1. EXPO_PUBLIC_API_BASE_URL (env, inlined at build time)
- * 2. expoConfig.extra.apiBaseUrl (app.config.js extra)
- * 3. http://localhost:8080 (dev fallback)
- *
- * For APK testing: set EXPO_PUBLIC_API_BASE_URL in .env or EAS env to your backend URL
- * (e.g. https://your-api.cloudwaysapps.com). Do not rely on localhost on a real device.
+ * 2. expoConfig.extra.apiBaseUrl (app.config.js extra – defaults to production API)
+ * 3. Production API fallback (same as web backend)
  */
 
 import Constants from 'expo-constants';
 
-const DEV_FALLBACK = 'http://localhost:8080';
+const PRODUCTION_API_BASE_URL = 'https://phpstack-1046663-6238875.cloudwaysapps.com';
 
 function fromEnv(): string | undefined {
   if (typeof process === 'undefined') return undefined;
@@ -30,5 +27,21 @@ function fromExtra(): string | undefined {
  * Base URL for all API requests. No trailing slash.
  */
 export function getApiBaseUrl(): string {
-  return fromEnv() ?? fromExtra() ?? DEV_FALLBACK;
+  const url = fromEnv() ?? fromExtra() ?? PRODUCTION_API_BASE_URL;
+  return url.replace(/\/+$/, '');
+}
+
+/**
+ * User-friendly message when an API/network request fails (e.g. no connection, timeout).
+ * Use this to show a clear "Network error" in the UI.
+ */
+export function getNetworkErrorMessage(error: unknown): string {
+  if (error instanceof TypeError && error.message?.toLowerCase().includes('network')) {
+    return 'Network error – check your connection and try again.';
+  }
+  const msg = error instanceof Error ? error.message : String(error);
+  if (/network request failed|failed to fetch|load failed/i.test(msg)) {
+    return 'Network error – check your connection and try again.';
+  }
+  return msg || 'Something went wrong. Please try again.';
 }

@@ -8,7 +8,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "build:apk": "eas build --platform android --profile preview",
-    "build:apk:prod": "eas build --platform android --profile production"
+    "build:apk:prod": "eas build --platform android --profile production",
+    "generate-icon": "node scripts/add-icon-padding.js"
   },
   "dependencies": {
     "@expo-google-fonts/montserrat": "^0.4.2",
@@ -40,6 +41,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
+    "sharp": "^0.33.5",
     "typescript": "~5.9.2"
   },
   "private": true

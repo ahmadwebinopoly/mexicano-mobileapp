@@ -12,6 +12,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { getMyOrders, startOrdersPolling, stopOrdersPolling, type Order } from '../../api/myorder';
+import { getNetworkErrorMessage } from '../../api/apiConfig';
 import { getToken } from '../../storagetank';
 import { navigateToLoginRegister } from '../../navigation/rootNavigationRef';
 import { OrdersScreenSkeleton } from '../../components/skeleton';
@@ -125,7 +126,7 @@ export default function OrdersScreen() {
       setCurrentOrders(response.current);
       setHistoryOrders(response.history);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to refresh orders.';
+      const msg = getNetworkErrorMessage(e);
       if (!msg.includes('Not authenticated')) {
         showToast(msg, 'error');
       }
