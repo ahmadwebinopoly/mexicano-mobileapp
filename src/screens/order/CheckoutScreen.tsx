@@ -13,7 +13,7 @@ import {
   View,
 } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { CardField, StripeProvider, confirmPayment, type CardFieldInput } from '@stripe/stripe-react-native';
+import { CardField, confirmPayment, initStripe, type CardFieldInput } from '@stripe/stripe-react-native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { placeOrder } from '../../api/orders';
@@ -86,7 +86,6 @@ export default function CheckoutScreen() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cod');
   const [cardholderName, setCardholderName] = useState('');
   const [cardDetails, setCardDetails] = useState<CardFieldInput.Details | null>(null);
-  const [stripePublishableKey, setStripePublishableKey] = useState<string | null>(null);
   const [stripeReady, setStripeReady] = useState(false);
   const [loadingStripe, setLoadingStripe] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -135,7 +134,9 @@ export default function CheckoutScreen() {
       if (!config.configured || !config.publishableKey) {
         throw new Error('Stripe is not configured right now. Please choose Cash on Delivery.');
       }
-      setStripePublishableKey(config.publishableKey);
+      await initStripe({
+        publishableKey: config.publishableKey,
+      });
       setStripeReady(true);
     } finally {
       setLoadingStripe(false);
@@ -393,46 +394,44 @@ export default function CheckoutScreen() {
           </View>
 
           {paymentMethod === 'stripe' ? (
-            stripePublishableKey ? (
-              <StripeProvider publishableKey={stripePublishableKey}>
-                <View style={styles.cardForm}>
-                  <Text style={styles.cardFormLabel}>Cardholder name</Text>
-                  <TextInput
-                    style={styles.cardInput}
-                    placeholder="Name on card"
-                    placeholderTextColor={MUTED_TEXT}
-                    value={cardholderName}
-                    onChangeText={setCardholderName}
-                    selectionColor={TEXT_WHITE}
-                    autoCapitalize="words"
-                    autoCorrect={false}
-                  />
-                  <Text style={[styles.cardFormLabel, { marginTop: 12 }]}>Card details</Text>
-                  <View style={styles.cardFieldWrap}>
-                    <CardField
-                      postalCodeEnabled={false}
-                      placeholders={{ number: '4242 4242 4242 4242' }}
-                      cardStyle={{
-                        backgroundColor: CARD_BG,
-                        textColor: '#FFFFFF',
-                        placeholderColor: 'rgba(255,255,255,0.6)',
-                        borderColor: 'transparent',
-                        borderWidth: 0,
-                        borderRadius: 8,
-                        textErrorColor: '#FF6B6B',
-                        fontSize: 15,
-                      }}
-                      style={styles.cardField}
-                      onCardChange={setCardDetails}
-                    />
-                  </View>
-                </View>
-              </StripeProvider>
-            ) : (
+            loadingStripe || !stripeReady ? (
               <View style={styles.cardForm}>
                 <Text style={styles.cardFormLabel}>Loading payment form…</Text>
                 <View style={[styles.cardFieldWrap, { alignItems: 'center', paddingVertical: 12 }]}>
                   <ActivityIndicator size="small" color={GOLD} />
+                </View>
+              </View>
+            ) : (
+              <View style={styles.cardForm}>
+                <Text style={styles.cardFormLabel}>Cardholder name</Text>
+                <TextInput
+                  style={styles.cardInput}
+                  placeholder="Name on card"
+                  placeholderTextColor={MUTED_TEXT}
+                  value={cardholderName}
+                  onChangeText={setCardholderName}
+                  selectionColor={TEXT_WHITE}
+                  autoCapitalize="words"
+                  autoCorrect={false}
+                />
+                <Text style={[styles.cardFormLabel, { marginTop: 12 }]}>Card details</Text>
+                <View style={styles.cardFieldWrap}>
+                  <CardField
+                    postalCodeEnabled={false}
+                    placeholders={{ number: '4242 4242 4242 4242' }}
+                    cardStyle={{
+                      backgroundColor: CARD_BG,
+                      textColor: '#FFFFFF',
+                      placeholderColor: 'rgba(255,255,255,0.6)',
+                      borderColor: 'transparent',
+                      borderWidth: 0,
+                      borderRadius: 8,
+                      textErrorColor: '#FF6B6B',
+                      fontSize: 15,
+                    }}
+                    style={styles.cardField}
+                    onCardChange={setCardDetails}
+                  />
                 </View>
               </View>
             )

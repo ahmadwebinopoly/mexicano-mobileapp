@@ -13,7 +13,9 @@ module.exports = {
     orientation: 'portrait',
     icon: './assets/Masterlogo-icon.png',
     userInterfaceStyle: 'light',
-    newArchEnabled: true,
+    // Stripe CardField has known Android device crashes with Fabric/new architecture in some setups.
+    // Keep classic architecture for payment stability.
+    newArchEnabled: false,
     jsEngine: 'hermes',
     scheme: 'mexicanoapp',
     splash: {
