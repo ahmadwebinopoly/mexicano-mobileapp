@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -20,6 +20,7 @@ import { CardField, confirmPayment, initStripe, type CardFieldInput } from '@str
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { applyDiscount } from '../../api/discounts';
 import { placeOrder } from '../../api/orders';
 import { getNetworkErrorMessage } from '../../api/apiConfig';
 import { useCart, type CartItem } from '../../contexts/CartContext';
@@ -106,6 +107,12 @@ export default function CheckoutScreen() {
   const [notes, setNotes] = useState('');
   const [discountCode, setDiscountCode] = useState('');
   const [discountApplied, setDiscountApplied] = useState(false);
+  const [discountApplying, setDiscountApplying] = useState(false);
+  const [discountPreview, setDiscountPreview] = useState<{
+    finalAmount: number;
+    discountAmount: number;
+    subtotalAtApply: number;
+  } | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cod');
   const [cardholderName, setCardholderName] = useState('');
   const [cardDetails, setCardDetails] = useState<CardFieldInput.Details | null>(null);
@@ -181,15 +188,65 @@ export default function CheckoutScreen() {
     setToast({ message, type });
   };
 
-  const handleApplyDiscount = () => {
+  const cartSubtotal = Number(total.toFixed(2));
+  const discountPreviewValid = useMemo(() => {
+    if (!discountApplied || !discountPreview || !discountCode.trim()) return false;
+    return Math.abs(discountPreview.subtotalAtApply - cartSubtotal) < 0.005;
+  }, [discountApplied, discountPreview, discountCode, cartSubtotal]);
+
+  const orderToCharge = useMemo(() => {
+    if (!discountPreviewValid || !discountPreview) return cartSubtotal;
+    return Math.max(0, discountPreview.finalAmount);
+  }, [discountPreviewValid, discountPreview, cartSubtotal]);
+
+  useEffect(() => {
+    if (!discountPreview) return;
+    if (Math.abs(discountPreview.subtotalAtApply - cartSubtotal) > 0.005) {
+      setDiscountApplied(false);
+      setDiscountPreview(null);
+    }
+  }, [cartSubtotal, discountPreview]);
+
+  const handleApplyDiscount = async () => {
     const code = discountCode.trim();
     if (!code) {
       showToast('Enter a discount code', 'error');
       return;
     }
-    setDiscountApplied(true);
-    Keyboard.dismiss();
-    showToast('Discount code applied', 'success');
+    if (!isLoggedIn) {
+      showToast('Sign in to apply a discount code', 'error');
+      return;
+    }
+    setDiscountApplying(true);
+    try {
+      const user = await getCurrentUser();
+      if (!user) {
+        showToast('Sign in to apply a discount code', 'error');
+        return;
+      }
+      const sub = total.toFixed(2);
+      const result = await applyDiscount({
+        code,
+        subtotal: sub,
+        currency: 'gbp',
+        customerId: user.id,
+      });
+      const subNum = parseFloat(sub);
+      setDiscountPreview({
+        finalAmount: result.finalAmount,
+        discountAmount: result.discountAmount,
+        subtotalAtApply: subNum,
+      });
+      setDiscountApplied(true);
+      Keyboard.dismiss();
+      showToast('Discount applied', 'success');
+    } catch (err) {
+      setDiscountApplied(false);
+      setDiscountPreview(null);
+      showToast(getNetworkErrorMessage(err), 'error');
+    } finally {
+      setDiscountApplying(false);
+    }
   };
 
   const ensureStripeIsReady = async () => {
@@ -271,7 +328,7 @@ export default function CheckoutScreen() {
 
       if (payModeSelected === 'stripe') {
         await ensureStripeIsReady();
-        const amount = Number(total.toFixed(2));
+        const amount = Number(orderToCharge.toFixed(2));
         if (Number.isNaN(amount) || amount < 0.5) {
           throw new Error('Minimum card payment amount is 0.50.');
         }
@@ -325,11 +382,11 @@ export default function CheckoutScreen() {
         customer,
         items: formatItemsForOrder(items),
         type: orderTypePayload,
-        amount: formatPrice(total.toFixed(2)),
+        amount: formatPrice(orderToCharge.toFixed(2)),
         address: addressPayload,
         phone: user?.phone?.trim() || '',
         notes: notes.trim() || undefined,
-        discountCode: discountCode.trim() || undefined,
+        discountCode: discountPreviewValid ? discountCode.trim() : undefined,
         paymentMethod: payMethod,
         paymentStatus: payStatus,
         paymentId: stripePaymentIntentId,
@@ -470,6 +527,7 @@ export default function CheckoutScreen() {
               onChangeText={(t) => {
                 setDiscountCode(t);
                 setDiscountApplied(false);
+                setDiscountPreview(null);
               }}
               autoCapitalize="characters"
               autoCorrect={false}
@@ -477,16 +535,29 @@ export default function CheckoutScreen() {
               onSubmitEditing={handleApplyDiscount}
             />
             <Pressable
-              style={({ pressed }) => [styles.discountSendBtn, pressed && styles.discountSendBtnPressed]}
-              onPress={handleApplyDiscount}
+              style={({ pressed }) => [
+                styles.discountSendBtn,
+                pressed && styles.discountSendBtnPressed,
+                discountApplying && styles.discountSendBtnDisabled,
+              ]}
+              onPress={() => void handleApplyDiscount()}
               hitSlop={6}
+              disabled={discountApplying}
               accessibilityLabel="Apply discount code"
             >
-              <Ionicons name="send" size={20} color={BG_DARK} />
+              {discountApplying ? (
+                <ActivityIndicator size="small" color={BG_DARK} />
+              ) : (
+                <Ionicons name="send" size={20} color={BG_DARK} />
+              )}
             </Pressable>
           </View>
-          {discountApplied && discountCode.trim() ? (
-            <Text style={styles.discountAppliedHint}>Code will be applied when you place the order.</Text>
+          {discountPreviewValid && discountPreview ? (
+            <Text style={styles.discountAppliedHint}>
+              {discountPreview.discountAmount > 0
+                ? `You save ${formatPrice(discountPreview.discountAmount.toFixed(2))} — new total ${formatPrice(orderToCharge.toFixed(2))}.`
+                : `New total ${formatPrice(orderToCharge.toFixed(2))}.`}
+            </Text>
           ) : null}
         </View>
 
@@ -577,7 +648,7 @@ export default function CheckoutScreen() {
       {/* Footer – same as OrderDetails/ItemDetail */}
       <View style={styles.bottomBar}>
         <View style={styles.totalWrap}>
-          <Text style={styles.totalPrice}>{formatPrice(total.toFixed(2))}</Text>
+          <Text style={styles.totalPrice}>{formatPrice(orderToCharge.toFixed(2))}</Text>
         </View>
         <Pressable
           style={[styles.placeOrderBtn, (items.length === 0 || !isLoggedIn) && styles.placeOrderBtnDisabled]}
@@ -1002,6 +1073,9 @@ const styles = StyleSheet.create({
     backgroundColor: GOLD,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  discountSendBtnDisabled: {
+    opacity: 0.55,
   },
   discountSendBtnPressed: {
     opacity: 0.88,
