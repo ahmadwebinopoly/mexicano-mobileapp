@@ -7,12 +7,14 @@ import {
   Image,
   useWindowDimensions,
   ScrollView,
+  KeyboardAvoidingView,
   Animated,
   Modal,
   TextInput,
   Alert,
   ActivityIndicator,
   Linking,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
@@ -175,11 +177,21 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
   const [homeNo, setHomeNo] = useState('');
   const [checkingAddress, setCheckingAddress] = useState(false);
   const [savingAddress, setSavingAddress] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<{
+    fullAddress?: string;
+    deliveryCity?: string;
+    deliveryState?: string;
+    deliveryZipCode?: string;
+  }>({});
+
+  // Avoid repeatedly prompting for location permission / overwriting manual edits.
+  const hasAutoFetchedLocationRef = useRef(false);
 
   const hasSavedAddressRef = useRef<boolean | null>(null);
   const addressCheckInFlightRef = useRef<Promise<boolean> | null>(null);
   const restaurantCoordsRef = useRef<Coordinates | null>(null);
   const restaurantCoordsInFlightRef = useRef<Promise<Coordinates | null> | null>(null);
+  const scrollRef = useRef<ScrollView | null>(null);
 
   const { width: screenWidth } = useWindowDimensions();
   const slideAnim = useRef(new Animated.Value(screenWidth)).current;
@@ -341,6 +353,17 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
         const results = await Location.reverseGeocodeAsync({ latitude, longitude });
         if (results && results.length > 0) {
           const place = results[0];
+          // Expo may not return postalCode consistently for all coordinates.
+          // Try a few fallbacks and then parse a postal-like token from formatted text.
+          const postalCandidateRaw =
+            (place as any)?.postalCode ??
+            (place as any)?.postcode ??
+            (place as any)?.postal_code ??
+            (place as any)?.zip ??
+            (place as any)?.postalcode;
+          const postalCandidate =
+            typeof postalCandidateRaw === 'string' ? postalCandidateRaw.trim() : '';
+
           const parts = [
             place.name,
             place.street,
@@ -352,9 +375,18 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
             .map((p) => (p ? String(p).trim() : ''))
             .filter(Boolean);
           if (parts.length > 0) formatted = parts.join(', ');
+
           setDeliveryCity(place.city ?? place.subregion ?? '');
           setDeliveryState(place.region ?? '');
-          setDeliveryZipCode(place.postalCode ?? '');
+          const zipFromFormatted = formatted ? formatted.match(/\b\d{4,10}\b/)?.[0] ?? '' : '';
+          setDeliveryZipCode(postalCandidate || zipFromFormatted);
+
+          // `fullAddress` is a required input for Save & Continue, so populate it from reverse geocode.
+          const streetLine = [place.name, place.street]
+            .map((p) => (p ? String(p).trim() : ''))
+            .filter(Boolean)
+            .join(', ');
+          setFullAddress(streetLine || formatted || '');
         }
       } catch {
         formatted = 'Current location';
@@ -366,6 +398,23 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
       setLocationFetching(false);
     }
   };
+
+  // When we land on the delivery location step (e.g. after login), automatically populate GPS + ZIP.
+  useEffect(() => {
+    if (step !== 'delivery_location') return;
+    if (hasAutoFetchedLocationRef.current) return;
+    if (deliveryLatitude != null && deliveryLongitude != null) return;
+
+    hasAutoFetchedLocationRef.current = true;
+    void fetchMyLocation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
+
+  useEffect(() => {
+    if (step === 'choose') {
+      hasAutoFetchedLocationRef.current = false;
+    }
+  }, [step]);
 
   const handleContinue = async () => {
     if (selectedOption === 'delivery') {
@@ -398,12 +447,27 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
 
   const handleDeliveryLocationContinue = async () => {
     const addressTrim = fullAddress.trim();
-    if (deliveryLatitude == null || deliveryLongitude == null) {
-      Alert.alert('Location required', 'Please fetch your location first.');
+    const cityTrim = deliveryCity.trim();
+    const stateTrim = deliveryState.trim();
+    const zipTrim = deliveryZipCode.trim();
+
+    const nextErrors: typeof fieldErrors = {};
+    if (!addressTrim) nextErrors.fullAddress = 'Full address is required.';
+    if (!cityTrim) nextErrors.deliveryCity = 'City is required.';
+    if (!stateTrim) nextErrors.deliveryState = 'State is required.';
+    if (!zipTrim) nextErrors.deliveryZipCode = 'Zip code is required.';
+
+    const hasErrors = Object.values(nextErrors).some(Boolean);
+    if (hasErrors) {
+      setFieldErrors(nextErrors);
       return;
     }
-    if (!addressTrim) {
-      Alert.alert('Address required', 'Please enter your full address.');
+
+    // Clear any previous field errors once validation passes.
+    setFieldErrors({});
+
+    if (deliveryLatitude == null || deliveryLongitude == null) {
+      Alert.alert('Location required', 'Please fetch your location first.');
       return;
     }
 
@@ -461,6 +525,13 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
     }
   };
 
+  const scrollToEndSoon = useCallback(() => {
+    // Ensure the ScrollView has laid out the focused input before scrolling.
+    requestAnimationFrame(() => {
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+    });
+  }, []);
+
   const enabledOptions = useMemo(
     () => SERVICE_OPTIONS.filter((opt) => opt.key && orderModes[opt.key as keyof OrderModes]),
     [orderModes]
@@ -482,11 +553,22 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
         <WaveTop />
       </View>
 
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
       >
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          ref={(r) => {
+            scrollRef.current = r;
+          }}
+          keyboardDismissMode="interactive"
+          contentInsetAdjustmentBehavior="automatic"
+        >
         {step === 'delivery_location' ? (
           /* Delivery: set location (fetch + manual fields) */
           <>
@@ -540,32 +622,51 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
                 placeholder="Street, building, area..."
                 placeholderTextColor="rgba(255,255,255,0.5)"
                 value={fullAddress}
-                onChangeText={setFullAddress}
+                onChangeText={(t) => {
+                  setFullAddress(t);
+                  if (fieldErrors.fullAddress) setFieldErrors((prev) => ({ ...prev, fullAddress: undefined }));
+                }}
               />
+              {fieldErrors.fullAddress ? <Text style={styles.fieldErrorText}>{fieldErrors.fullAddress}</Text> : null}
               <Text style={styles.manualFieldsLabel}>City</Text>
               <TextInput
                 style={styles.deliveryInput}
                 placeholder="City"
                 placeholderTextColor="rgba(255,255,255,0.5)"
                 value={deliveryCity}
-                onChangeText={setDeliveryCity}
+                onChangeText={(t) => {
+                  setDeliveryCity(t);
+                  if (fieldErrors.deliveryCity) setFieldErrors((prev) => ({ ...prev, deliveryCity: undefined }));
+                }}
               />
+              {fieldErrors.deliveryCity ? <Text style={styles.fieldErrorText}>{fieldErrors.deliveryCity}</Text> : null}
               <Text style={styles.manualFieldsLabel}>State</Text>
               <TextInput
                 style={styles.deliveryInput}
                 placeholder="State"
                 placeholderTextColor="rgba(255,255,255,0.5)"
                 value={deliveryState}
-                onChangeText={setDeliveryState}
+                onChangeText={(t) => {
+                  setDeliveryState(t);
+                  if (fieldErrors.deliveryState) setFieldErrors((prev) => ({ ...prev, deliveryState: undefined }));
+                }}
               />
+              {fieldErrors.deliveryState ? <Text style={styles.fieldErrorText}>{fieldErrors.deliveryState}</Text> : null}
               <Text style={styles.manualFieldsLabel}>Zip code</Text>
               <TextInput
                 style={styles.deliveryInput}
                 placeholder="Zip code"
                 placeholderTextColor="rgba(255,255,255,0.5)"
                 value={deliveryZipCode}
-                onChangeText={setDeliveryZipCode}
+                onFocus={scrollToEndSoon}
+                onChangeText={(t) => {
+                  setDeliveryZipCode(t);
+                  if (fieldErrors.deliveryZipCode) setFieldErrors((prev) => ({ ...prev, deliveryZipCode: undefined }));
+                }}
               />
+              {fieldErrors.deliveryZipCode ? (
+                <Text style={styles.fieldErrorText}>{fieldErrors.deliveryZipCode}</Text>
+              ) : null}
               <Text style={styles.manualFieldsLabel}>Add details (optional)</Text>
               <TextInput
                 style={styles.deliveryInput}
@@ -573,6 +674,7 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
                 placeholderTextColor="rgba(255,255,255,0.5)"
                 value={locationLabel}
                 onChangeText={setLocationLabel}
+                onFocus={scrollToEndSoon}
               />
               <TextInput
                 style={styles.deliveryInput}
@@ -580,6 +682,7 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
                 placeholderTextColor="rgba(255,255,255,0.5)"
                 value={floor}
                 onChangeText={setFloor}
+                onFocus={scrollToEndSoon}
               />
               <TextInput
                 style={styles.deliveryInput}
@@ -587,6 +690,7 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
                 placeholderTextColor="rgba(255,255,255,0.5)"
                 value={homeNo}
                 onChangeText={setHomeNo}
+                onFocus={scrollToEndSoon}
               />
               <Pressable
                 style={[styles.button, styles.deliveryContinueBtn, savingAddress && styles.buttonDisabled]}
@@ -686,6 +790,7 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
         </>
         )}
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Modal when delivery is disabled from API */}
       <Modal
@@ -776,7 +881,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 24,
-    paddingBottom: 40,
+    paddingBottom: 160,
   },
   brandSection: {
     alignItems: 'center',
@@ -1103,6 +1208,13 @@ const styles = StyleSheet.create({
     color: TEXT_COLOR,
     borderWidth: 1,
     borderColor: 'rgba(254, 203, 77, 0.2)',
+  },
+  fieldErrorText: {
+    marginTop: 6,
+    color: '#FF6B6B',
+    fontFamily: 'Montserrat_600SemiBold',
+    fontSize: 12,
+    fontWeight: '600',
   },
   deliveryContinueBtn: {
     marginTop: 16,

@@ -26,13 +26,13 @@ const TEXT_WHITE = '#FFFFFF';
 const MUTED_TEXT = 'rgba(255,255,255,0.7)';
 const HORIZONTAL_PADDING = 20;
 
-type OrderTab = 'current' | 'history';
+type OrderTab = 'all' | 'current' | 'history';
 
 export default function OrdersScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const [activeTab, setActiveTab] = useState<OrderTab>('current');
+  const [activeTab, setActiveTab] = useState<OrderTab>('all');
   const [currentOrders, setCurrentOrders] = useState<Order[]>([]);
   const [historyOrders, setHistoryOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
@@ -135,7 +135,16 @@ export default function OrdersScreen() {
     }
   };
 
-  const orders = activeTab === 'current' ? currentOrders : historyOrders;
+  const orders =
+    activeTab === 'current'
+      ? currentOrders
+      : activeTab === 'history'
+        ? historyOrders
+        : [...currentOrders, ...historyOrders].sort((a, b) => {
+            const ta = new Date(a.date || a.createdAt).getTime();
+            const tb = new Date(b.date || b.createdAt).getTime();
+            return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+          });
 
   const formatDate = (dateStr: string) => {
     try {
@@ -188,24 +197,34 @@ export default function OrdersScreen() {
     <View style={styles.emptyState}>
       <View style={styles.emptyIconWrap}>
         <Ionicons
-          name={activeTab === 'current' ? 'receipt-outline' : 'time-outline'}
+          name={activeTab === 'history' ? 'time-outline' : 'receipt-outline'}
           size={48}
           color={GOLD}
         />
       </View>
       <Text style={styles.emptyTitle}>
-        {activeTab === 'current' ? 'No current orders' : 'No order history'}
+        {activeTab === 'all'
+          ? 'No orders yet'
+          : activeTab === 'current'
+            ? 'No current orders'
+            : 'No order history'}
       </Text>
       <Text style={styles.emptySubtitle}>
-        {activeTab === 'current'
-          ? 'Your active orders will appear here'
-          : 'Your past orders will appear here'}
+        {activeTab === 'all'
+          ? 'When you place an order, it will appear here.'
+          : activeTab === 'current'
+            ? 'Your active orders will appear here.'
+            : 'Your past orders will appear here.'}
       </Text>
     </View>
   );
 
   const renderOrderCard = (order: Order) => (
-    <Pressable key={order.id} style={styles.orderCard}>
+    <Pressable
+      key={order.id}
+      style={styles.orderCard}
+      onPress={() => navigation.navigate('ViewOrderDetails', { orderId: order.id })}
+    >
       <View style={styles.orderHeader}>
         <Text style={styles.orderNumber}>Order {order.id}</Text>
         <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.status) + '20' }]}>
@@ -253,6 +272,14 @@ export default function OrdersScreen() {
 
       {/* Tab bar */}
       <View style={styles.tabBar}>
+        <Pressable
+          style={[styles.tab, activeTab === 'all' && styles.tabActive]}
+          onPress={() => setActiveTab('all')}
+        >
+          <Text style={[styles.tabText, activeTab === 'all' && styles.tabTextActive]}>
+            All
+          </Text>
+        </Pressable>
         <Pressable
           style={[styles.tab, activeTab === 'current' && styles.tabActive]}
           onPress={() => setActiveTab('current')}

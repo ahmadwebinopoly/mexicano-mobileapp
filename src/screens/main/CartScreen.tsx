@@ -41,7 +41,7 @@ function getAddonsSubtitle(item: CartItem): string {
   const addons = Array.isArray(item.addons) ? item.addons : [];
   if (addons.length === 0) return '';
   const names = addons.map((a) => (a.name && String(a.name).trim()) || a.id || '').filter(Boolean);
-  return names.length > 0 ? names.join(', ') : '';
+  return names.length > 0 ? `Add-ons: ${names.join(', ')}` : '';
 }
 
 export default function CartScreen() {

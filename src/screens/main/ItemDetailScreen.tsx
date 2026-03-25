@@ -32,9 +32,14 @@ const ADDON_CARD_WIDTH = (SCREEN_WIDTH - HORIZONTAL_PADDING * 2 - 12) / 2;
 
 /** Raw addon from items API (e.g. { id, name, price }). */
 export type ItemDetailAddonRaw = {
-  id: string;
+  id?: string | number;
+  _id?: string | number;
+  addonId?: string | number;
   name?: string;
+  title?: string;
+  itemName?: string;
   price?: string;
+  amount?: string | number;
   image?: string | { uri: string };
   [key: string]: unknown;
 };
@@ -61,9 +66,15 @@ function formatPrice(price: string): string {
 
 /** Normalize raw addon from items API to AddonItem for display. */
 function normalizeAddonFromItem(raw: ItemDetailAddonRaw): AddonItem {
-  const id = raw.id != null ? String(raw.id) : '';
-  const name = raw.name != null ? String(raw.name) : '';
-  const price = raw.price != null ? String(raw.price) : '';
+  const idValue = raw.id ?? raw._id ?? raw.addonId;
+  const nameValue = raw.name ?? raw.title ?? raw.itemName;
+  const priceValue = raw.price ?? raw.amount;
+  const id =
+    idValue != null
+      ? String(idValue)
+      : `${String(nameValue ?? '').trim()}-${String(priceValue ?? '').trim()}`;
+  const name = nameValue != null ? String(nameValue) : '';
+  const price = priceValue != null ? String(priceValue) : '';
   const img = raw.image;
   const image =
     typeof img === 'string' && img.trim()

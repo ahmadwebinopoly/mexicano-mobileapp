@@ -13,6 +13,7 @@ import OrdersScreen from '../screens/main/OrdersScreen';
 import CheckoutScreen from '../screens/order/CheckoutScreen';
 import CartScreen from '../screens/main/CartScreen';
 import LoginRegisterScreen from '../screens/auth/LoginRegisterScreen';
+import ViewOrderDetailsScreen from '../screens/order/ViewOrderDetailsScreen.tsx';
 import type { ItemDetailParamItem } from '../screens/main/ItemDetailScreen';
 import { CartProvider } from '../contexts/CartContext';
 
@@ -33,6 +34,7 @@ export type RootStackParamList = {
   };
   LoginRegister: { returnTo?: 'Checkout' } | undefined;
   Orders: { showOrderSuccessToast?: boolean } | undefined;
+  ViewOrderDetails: { orderId: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -69,6 +71,7 @@ export default function RootNavigator() {
         <Stack.Screen name="Address" component={AddressScreen} />
         <Stack.Screen name="Map" component={MapScreen} />
         <Stack.Screen name="Orders" component={OrdersScreen} />
+        <Stack.Screen name="ViewOrderDetails" component={ViewOrderDetailsScreen} />
       </Stack.Navigator>
     </NavigationContainer>
     </CartProvider>
