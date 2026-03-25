@@ -34,6 +34,8 @@ module.exports = {
       },
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,
+      // Let the window resize when the keyboard opens so checkout fields stay visible above Stripe CardField.
+      softwareKeyboardLayoutMode: 'resize',
     },
     web: {
       favicon: './assets/favicon.png',

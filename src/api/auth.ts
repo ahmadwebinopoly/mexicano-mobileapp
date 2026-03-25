@@ -47,7 +47,20 @@ export async function register(payload: RegisterPayload): Promise<unknown> {
     const text = await res.text();
     throw new Error(text || `API error: ${res.status} ${res.statusText}`);
   }
-  return res.json().catch(() => ({}));
+  const data = (await res.json().catch(() => ({}))) as {
+    token?: string;
+    accessToken?: string;
+    access_token?: string;
+    [key: string]: unknown;
+  };
+
+  // Some backends return a token directly on register; persist it so the user is considered logged in.
+  const token = data.token ?? data.accessToken ?? data.access_token;
+  if (typeof token === 'string' && token.length > 0) {
+    await saveToken(token);
+  }
+
+  return data;
 }
 
 export interface LoginPayload {
@@ -93,6 +106,53 @@ export async function googleLogin(idToken: string): Promise<GoogleLoginResponse>
   if (typeof token === 'string' && token.length > 0) {
     await saveToken(token);
   }
+  return data;
+}
+
+export interface GoogleSocialLoginPayload {
+  email: string;
+  name: string;
+  provider_id: string;
+  avatar?: string | null;
+}
+
+/**
+ * POST /api/auth/google – Google social login (signup + login)
+ * Body: { email, name, provider_id, avatar? }
+ * Returns: { user, token } (token is saved locally via storagetank).
+ */
+export async function googleSocialLogin(payload: GoogleSocialLoginPayload): Promise<GoogleLoginResponse> {
+  const email = String(payload.email ?? '').trim().toLowerCase();
+  const name = String(payload.name ?? '').trim();
+  const provider_id = String(payload.provider_id ?? '').trim();
+  const avatar = payload.avatar ? String(payload.avatar).trim() : undefined;
+
+  if (!email || !name || !provider_id) {
+    throw new Error('Google sign-in failed. Missing required profile fields.');
+  }
+
+  const res = await fetch(ENDPOINTS.google, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email,
+      name,
+      provider_id,
+      avatar: avatar || undefined,
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `Google social login failed: ${res.status} ${res.statusText}`);
+  }
+
+  const data = (await res.json().catch(() => ({}))) as GoogleLoginResponse;
+  const token = data.token;
+  if (typeof token === 'string' && token.length > 0) {
+    await saveToken(token);
+  }
+
   return data;
 }
 

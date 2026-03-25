@@ -4,7 +4,10 @@ import {
   Alert,
   Animated,
   Image,
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,7 +18,7 @@ import {
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { CardField, confirmPayment, initStripe, type CardFieldInput } from '@stripe/stripe-react-native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { placeOrder } from '../../api/orders';
 import { getNetworkErrorMessage } from '../../api/apiConfig';
 import { useCart, type CartItem } from '../../contexts/CartContext';
@@ -76,6 +79,7 @@ type PaymentMethod = 'cod' | 'stripe';
 
 export default function CheckoutScreen() {
   const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
   const { items, removeItem, updateQuantity, clearCart, total } = useCart();
   const [placing, setPlacing] = useState(false);
   const [showSkeleton, setShowSkeleton] = useState(true);
@@ -90,6 +94,22 @@ export default function CheckoutScreen() {
   const [loadingStripe, setLoadingStripe] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const toastOpacity = useRef(new Animated.Value(0)).current;
+  /** Extra bottom padding while keyboard is open so Stripe CardField + inputs scroll above the keyboard. */
+  const [keyboardBottomInset, setKeyboardBottomInset] = useState(0);
+
+  useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const onShow = (e: { endCoordinates: { height: number } }) =>
+      setKeyboardBottomInset(e.endCoordinates.height);
+    const onHide = () => setKeyboardBottomInset(0);
+    const subShow = Keyboard.addListener(showEvt, onShow);
+    const subHide = Keyboard.addListener(hideEvt, onHide);
+    return () => {
+      subShow.remove();
+      subHide.remove();
+    };
+  }, []);
 
   useEffect(() => {
     const t = setTimeout(() => setShowSkeleton(false), 400);
@@ -269,9 +289,19 @@ export default function CheckoutScreen() {
 
   const showLoginGate = !authChecking && !isLoggedIn;
 
+  const scrollBottomPadding =
+    20 + keyboardBottomInset + (keyboardBottomInset > 0 ? Math.max(insets.bottom, 12) : 0);
+
+  const keyboardVerticalOffset = Platform.OS === 'ios' ? insets.top + 4 : 0;
+
   return (
     <View style={styles.wrapper}>
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoid}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={keyboardVerticalOffset}
+      >
       {/* Header */}
       <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={() => navigation.goBack()}>
@@ -283,8 +313,10 @@ export default function CheckoutScreen() {
 
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: scrollBottomPadding }]}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       >
         {showSkeleton ? (
           <CheckoutScreenSkeleton />
@@ -462,6 +494,7 @@ export default function CheckoutScreen() {
           )}
         </Pressable>
       </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
 
       {/* Login required modal – same pattern as Profile "My Addresses" */}
@@ -542,6 +575,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: BG_DARK,
+  },
+  keyboardAvoid: {
+    flex: 1,
   },
   loginRequiredBackdrop: {
     flex: 1,

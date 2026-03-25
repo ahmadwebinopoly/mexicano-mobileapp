@@ -23,6 +23,7 @@ import { getOrderModes, type OrderModes } from '../api/orderModes';
 import { getToken } from '../storagetank';
 import { navigateToLoginRegister } from '../navigation/rootNavigationRef';
 import { saveAddress, getAllAddresses } from '../api/saveadresss';
+import { getVisit } from '../api/content';
 
 const ONBOARDING_ORDER_MODE_KEY = 'onboarding_order_mode';
 const ONBOARDING_DELIVERY_ADDRESS_KEY = 'onboarding_delivery_address';
@@ -111,6 +112,47 @@ const SERVICE_OPTIONS: { key: ServiceOption; icon: React.ComponentProps<typeof M
 
 type OnboardingStep = 'choose' | 'delivery_location';
 
+type Coordinates = {
+  latitude: number;
+  longitude: number;
+};
+
+function toRadians(value: number): number {
+  return (value * Math.PI) / 180;
+}
+
+function calculateDistanceKm(from: Coordinates, to: Coordinates): number {
+  const earthRadiusKm = 6371;
+  const deltaLat = toRadians(to.latitude - from.latitude);
+  const deltaLng = toRadians(to.longitude - from.longitude);
+  const a =
+    Math.sin(deltaLat / 2) ** 2 +
+    Math.cos(toRadians(from.latitude)) *
+      Math.cos(toRadians(to.latitude)) *
+      Math.sin(deltaLng / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadiusKm * c;
+}
+
+function extractCoordinatesFromMapsUrl(mapsUrl: string | undefined): Coordinates | null {
+  if (!mapsUrl) return null;
+  const decoded = decodeURIComponent(mapsUrl);
+  const patterns = [
+    /[?&](?:q|query|center)=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/i,
+    /@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?),/i,
+  ];
+  for (const pattern of patterns) {
+    const match = decoded.match(pattern);
+    if (!match) continue;
+    const latitude = Number(match[1]);
+    const longitude = Number(match[2]);
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      return { latitude, longitude };
+    }
+  }
+  return null;
+}
+
 export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
   const [buttonPressed, setButtonPressed] = useState(false);
   const [selectedOption, setSelectedOption] = useState<ServiceOption>(null);
@@ -136,6 +178,8 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
 
   const hasSavedAddressRef = useRef<boolean | null>(null);
   const addressCheckInFlightRef = useRef<Promise<boolean> | null>(null);
+  const restaurantCoordsRef = useRef<Coordinates | null>(null);
+  const restaurantCoordsInFlightRef = useRef<Promise<Coordinates | null> | null>(null);
 
   const { width: screenWidth } = useWindowDimensions();
   const slideAnim = useRef(new Animated.Value(screenWidth)).current;
@@ -163,6 +207,56 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
       return await req;
     } finally {
       addressCheckInFlightRef.current = null;
+    }
+  }, []);
+
+  const getRestaurantCoords = useCallback(async (): Promise<Coordinates | null> => {
+    if (restaurantCoordsRef.current) {
+      return restaurantCoordsRef.current;
+    }
+    if (restaurantCoordsInFlightRef.current) {
+      return restaurantCoordsInFlightRef.current;
+    }
+
+    const req = (async () => {
+      try {
+        const visit = await getVisit();
+        const fromMap = extractCoordinatesFromMapsUrl(visit.location?.mapsUrl);
+        if (fromMap) {
+          restaurantCoordsRef.current = fromMap;
+          return fromMap;
+        }
+
+        const addressParts = [
+          visit.location?.address,
+          visit.location?.city,
+          visit.location?.state,
+          visit.location?.zip,
+        ]
+          .map((value) => (value ? value.trim() : ''))
+          .filter(Boolean);
+
+        if (addressParts.length === 0) {
+          return null;
+        }
+
+        const geocoded = await Location.geocodeAsync(addressParts.join(', '));
+        const first = geocoded[0];
+        if (!first) return null;
+
+        const coords = { latitude: first.latitude, longitude: first.longitude };
+        restaurantCoordsRef.current = coords;
+        return coords;
+      } catch {
+        return null;
+      }
+    })();
+
+    restaurantCoordsInFlightRef.current = req;
+    try {
+      return await req;
+    } finally {
+      restaurantCoordsInFlightRef.current = null;
     }
   }, []);
 
@@ -312,6 +406,29 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
       Alert.alert('Address required', 'Please enter your full address.');
       return;
     }
+
+    if (orderModes.deliveryRadiusEnabled) {
+      const restaurantCoords = await getRestaurantCoords();
+      const radiusKm = orderModes.deliveryRadiusKm ?? 10;
+      if (!restaurantCoords) {
+        Alert.alert('Delivery radius unavailable', 'Please try again later.');
+        return;
+      }
+
+      const userCoords: Coordinates = {
+        latitude: deliveryLatitude,
+        longitude: deliveryLongitude,
+      };
+      const distanceKm = calculateDistanceKm(userCoords, restaurantCoords);
+      if (distanceKm > radiusKm) {
+        Alert.alert(
+          'Out of delivery radius',
+          `Sorry, we currently deliver only within ${radiusKm} km from our restaurant.`
+        );
+        return;
+      }
+    }
+
     const labelTrim = locationLabel.trim() || 'Home';
     const floorTrim = floor.trim();
     const homeNoTrim = homeNo.trim();
@@ -637,6 +754,7 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
           </Pressable>
         </SafeAreaView>
       </Modal>
+
     </SafeAreaView>
   );
 }

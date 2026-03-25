@@ -14,9 +14,12 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons, FontAwesome } from '@expo/vector-icons';
-import { register as registerApi, login as loginApi } from '../../api/auth';
+import { register as registerApi, login as loginApi, googleSocialLogin } from '../../api/auth';
 import { getCurrentUser } from '../../api/profile';
 import { registerForPushNotifications } from '../../services/pushNotifications';
+import * as WebBrowser from 'expo-web-browser';
+import * as Google from 'expo-auth-session/providers/google';
+import { makeRedirectUri } from 'expo-auth-session';
 
 const TOAST_DURATION = 2800;
 
@@ -47,6 +50,7 @@ export default function LoginRegisterScreen() {
   const [regEmail, setRegEmail] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [regSubmitting, setRegSubmitting] = useState(false);
+  const [googleSubmitting, setGoogleSubmitting] = useState(false);
 
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const toastOpacity = useRef(new Animated.Value(0)).current;
@@ -65,6 +69,79 @@ export default function LoginRegisterScreen() {
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type });
+  };
+
+  // Google OAuth client id is public in the mobile app bundle.
+  // The client secret must stay server-side.
+  const googleClientId =
+    (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_GOOGLE_CLIENT_ID) || '';
+
+  WebBrowser.maybeCompleteAuthSession();
+
+  // Must match `scheme` in `app.config.js` so Google can redirect back into the app.
+  const redirectUri = makeRedirectUri({ scheme: 'mexicanoapp' });
+
+  // PKCE is required for many mobile OAuth security policies.
+  const [, , promptAsync] = Google.useAuthRequest({
+    clientId: googleClientId,
+    redirectUri,
+    scopes: ['openid', 'profile', 'email'],
+    usePKCE: true,
+  });
+
+  const handleGoogleSocialLogin = async () => {
+    if (googleSubmitting) return;
+
+    if (!googleClientId) {
+      showToast('Google client id is missing in env.', 'error');
+      return;
+    }
+
+    setGoogleSubmitting(true);
+    try {
+      const result = await promptAsync();
+      if (!result || result.type !== 'success') {
+        showToast('Google sign-in cancelled.', 'error');
+        return;
+      }
+
+      const accessToken = result.authentication?.accessToken;
+      if (!accessToken) {
+        throw new Error('Google sign-in failed. Missing access token.');
+      }
+
+      const profileRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo?alt=json', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+
+      if (!profileRes.ok) {
+        const text = await profileRes.text().catch(() => '');
+        throw new Error(text || `Google profile fetch failed: ${profileRes.status}`);
+      }
+
+      const profile = await profileRes.json().catch(() => ({})) as {
+        id?: string | number;
+        email?: string;
+        name?: string;
+        picture?: string;
+      };
+
+      const email = profile.email ?? '';
+      const name = profile.name ?? '';
+      const provider_id = profile.id != null ? String(profile.id) : '';
+      const avatar = profile.picture ?? undefined;
+
+      await googleSocialLogin({ email, name, provider_id, avatar });
+      await getCurrentUser();
+      void registerForPushNotifications();
+
+      showToast('Signed in with Google successfully.', 'success');
+      setTimeout(() => navigation.goBack(), 800);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Google sign-in failed.', 'error');
+    } finally {
+      setGoogleSubmitting(false);
+    }
   };
 
   const handleLogin = async () => {
@@ -119,14 +196,35 @@ export default function LoginRegisterScreen() {
         email,
         password,
       });
+
+      // If the backend returns a token on register, `getCurrentUser()` will work immediately.
+      // Otherwise, fall back to calling `loginApi()` to obtain a token.
+      let user = await getCurrentUser();
+      if (!user) {
+        await loginApi({ email, password });
+        user = await getCurrentUser();
+      }
+
+      if (user) {
+        void registerForPushNotifications();
+      }
+
       setRegName('');
       setRegPhone('');
       setRegEmail('');
       setRegPassword('');
-      showToast('Account created successfully.', 'success');
-      setTimeout(() => setAuthTab('Login'), 600);
+
+      // Always leave the auth screen after registration attempt.
+      // ProfileScreen will re-load the user on focus.
+      showToast(
+        user ? 'Account created and signed in.' : 'Account created. Checking your profile...',
+        'success'
+      );
+      setTimeout(() => navigation.goBack(), 600);
     } catch (e) {
+      // If auto-login fails, fall back to showing the Login tab.
       showToast(e instanceof Error ? e.message : 'Registration failed.', 'error');
+      setAuthTab('Login');
     } finally {
       setRegSubmitting(false);
     }
@@ -220,8 +318,9 @@ export default function LoginRegisterScreen() {
                 <Pressable
                   style={styles.socialButton}
                   onPress={() => {
-                    showToast('Google login coming soon', 'error');
+                    void handleGoogleSocialLogin();
                   }}
+                  disabled={googleSubmitting}
                 >
                   <FontAwesome name="google" size={20} color="#DB4437" />
                   <Text style={styles.socialButtonText}>Google</Text>
@@ -309,8 +408,9 @@ export default function LoginRegisterScreen() {
                 <Pressable
                   style={styles.socialButton}
                   onPress={() => {
-                    showToast('Google login coming soon', 'error');
+                    void handleGoogleSocialLogin();
                   }}
+                  disabled={googleSubmitting}
                 >
                   <FontAwesome name="google" size={20} color="#DB4437" />
                   <Text style={styles.socialButtonText}>Google</Text>
