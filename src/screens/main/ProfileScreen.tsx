@@ -173,6 +173,25 @@ export default function ProfileScreen() {
 
           <Pressable
             style={styles.listItem}
+            onPress={() => {
+              if (currentUser) {
+                navigation.getParent()?.navigate('Reviews');
+              } else {
+                showToast('Please login first', 'error');
+              }
+            }}
+          >
+            <View>
+              <Text style={styles.listLabel}>Reviews</Text>
+              <Text style={styles.listSubLabel}>See and share feedback</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={MUTED_TEXT} />
+          </Pressable>
+
+          <View style={styles.listDivider} />
+
+          <Pressable
+            style={styles.listItem}
             onPress={() => setLanguageModalVisible(true)}
           >
             <View>

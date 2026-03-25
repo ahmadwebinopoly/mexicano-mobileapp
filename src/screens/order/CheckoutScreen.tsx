@@ -19,6 +19,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { CardField, confirmPayment, initStripe, type CardFieldInput } from '@stripe/stripe-react-native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { placeOrder } from '../../api/orders';
 import { getNetworkErrorMessage } from '../../api/apiConfig';
 import { useCart, type CartItem } from '../../contexts/CartContext';
@@ -34,6 +35,22 @@ const GOLD = '#FECB4D';
 const TEXT_WHITE = '#FFFFFF';
 const MUTED_TEXT = 'rgba(255,255,255,0.7)';
 const HORIZONTAL_PADDING = 20;
+
+type OrderMode = 'delivery' | 'dining' | 'takeaway' | null;
+const ONBOARDING_ORDER_MODE_KEY = 'onboarding_order_mode';
+
+/** Read mode saved by OnBoardingScreen — must be fresh at place-order time (avoid default 'delivery' race). */
+async function readOrderModeFromStorage(): Promise<'delivery' | 'dining' | 'takeaway'> {
+  try {
+    const saved = await AsyncStorage.getItem(ONBOARDING_ORDER_MODE_KEY);
+    if (saved === 'delivery' || saved === 'dining' || saved === 'takeaway') {
+      return saved;
+    }
+  } catch {
+    /* ignore */
+  }
+  return 'delivery';
+}
 
 function formatPrice(price: string): string {
   if (price == null || String(price).trim() === '') return '$0.00';
@@ -87,6 +104,8 @@ export default function CheckoutScreen() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loginModalDismissed, setLoginModalDismissed] = useState(false);
   const [notes, setNotes] = useState('');
+  const [discountCode, setDiscountCode] = useState('');
+  const [discountApplied, setDiscountApplied] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cod');
   const [cardholderName, setCardholderName] = useState('');
   const [cardDetails, setCardDetails] = useState<CardFieldInput.Details | null>(null);
@@ -94,6 +113,7 @@ export default function CheckoutScreen() {
   const [loadingStripe, setLoadingStripe] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const toastOpacity = useRef(new Animated.Value(0)).current;
+  const [orderMode, setOrderMode] = useState<OrderMode>(null);
   /** Extra bottom padding while keyboard is open so Stripe CardField + inputs scroll above the keyboard. */
   const [keyboardBottomInset, setKeyboardBottomInset] = useState(0);
 
@@ -115,6 +135,23 @@ export default function CheckoutScreen() {
     const t = setTimeout(() => setShowSkeleton(false), 400);
     return () => clearTimeout(t);
   }, []);
+
+  const loadOrderMode = React.useCallback(async () => {
+    const mode = await readOrderModeFromStorage();
+    setOrderMode(mode);
+  }, []);
+
+  // Load selected service option (delivery / dining / takeaway) from onboarding.
+  useEffect(() => {
+    void loadOrderMode();
+  }, [loadOrderMode]);
+
+  // Re-read when returning to checkout so mode matches onboarding (e.g. after app resume).
+  useFocusEffect(
+    React.useCallback(() => {
+      void loadOrderMode();
+    }, [loadOrderMode])
+  );
 
   useEffect(() => {
     if (!toast) return;
@@ -142,6 +179,17 @@ export default function CheckoutScreen() {
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type });
+  };
+
+  const handleApplyDiscount = () => {
+    const code = discountCode.trim();
+    if (!code) {
+      showToast('Enter a discount code', 'error');
+      return;
+    }
+    setDiscountApplied(true);
+    Keyboard.dismiss();
+    showToast('Discount code applied', 'success');
   };
 
   const ensureStripeIsReady = async () => {
@@ -194,22 +242,34 @@ export default function CheckoutScreen() {
       }
     }
 
+    // Capture before any await — avoids wrong method if state changed mid-flow.
+    const payModeSelected: PaymentMethod = paymentMethod;
+
     setPlacing(true);
     try {
       const user = await getCurrentUser();
-      const address = await getAddress();
-
       const customer = (user?.name && user.name.trim()) || user?.email || 'Customer';
-      const addressStr = formatAddress(address);
-      if (!addressStr.trim()) {
-        Alert.alert('Address required', 'Please add a delivery address in My Addresses before placing your order.');
-        setPlacing(false);
-        return;
+      // Always read from storage here — state may still be null or stale 'delivery' before async load finishes.
+      const mode = await readOrderModeFromStorage();
+      const requiresAddress = mode === 'delivery';
+
+      let addressStr = '';
+      if (requiresAddress) {
+        const address = await getAddress();
+        addressStr = formatAddress(address);
+        if (!addressStr.trim()) {
+          Alert.alert(
+            'Address required',
+            'Please add a delivery address in My Addresses before placing your order.'
+          );
+          setPlacing(false);
+          return;
+        }
       }
 
       let stripePaymentIntentId: string | undefined;
 
-      if (paymentMethod === 'stripe') {
+      if (payModeSelected === 'stripe') {
         await ensureStripeIsReady();
         const amount = Number(total.toFixed(2));
         if (Number.isNaN(amount) || amount < 0.5) {
@@ -250,25 +310,33 @@ export default function CheckoutScreen() {
         }
       }
 
-      // Place order after Stripe success (Option A) – send correct paymentMethod/paymentStatus so admin shows Stripe/Paid
-      // Include both camelCase and snake_case so backend accepts either format
-      const payMethod = paymentMethod === 'stripe' ? 'Stripe' : 'COD';
-      const payStatus = paymentMethod === 'stripe' ? 'Paid' : 'Pending';
+      // Place order after Stripe success — payMethod/payStatus must match payModeSelected (placeOrder adds snake_case too).
+      const payMethod = payModeSelected === 'stripe' ? 'Stripe' : 'COD';
+      const payStatus = payModeSelected === 'stripe' ? 'Paid' : 'Pending';
+      // Backend expects distinct types (see myorder Order.type): Delivery | Pickup | Dine In
+      const orderTypePayload: 'Delivery' | 'Pickup' | 'Dine In' =
+        mode === 'delivery' ? 'Delivery' : mode === 'dining' ? 'Dine In' : 'Pickup';
+      const addressPayload = requiresAddress
+        ? addressStr
+        : mode === 'dining'
+          ? 'Dine In'
+          : 'Take away';
       await placeOrder({
         customer,
         items: formatItemsForOrder(items),
-        type: 'Delivery',
+        type: orderTypePayload,
         amount: formatPrice(total.toFixed(2)),
-        address: addressStr,
+        address: addressPayload,
         phone: user?.phone?.trim() || '',
         notes: notes.trim() || undefined,
+        discountCode: discountCode.trim() || undefined,
         paymentMethod: payMethod,
         paymentStatus: payStatus,
         paymentId: stripePaymentIntentId,
       });
 
       clearCart();
-      if (paymentMethod === 'stripe') {
+      if (payModeSelected === 'stripe') {
         showToast('Payment successful', 'success');
       } else {
         showToast('Order placed', 'success');
@@ -389,6 +457,37 @@ export default function CheckoutScreen() {
             multiline
             numberOfLines={3}
           />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Discount code</Text>
+          <View style={styles.discountRow}>
+            <TextInput
+              style={styles.discountInput}
+              placeholder="Enter code"
+              placeholderTextColor={MUTED_TEXT}
+              value={discountCode}
+              onChangeText={(t) => {
+                setDiscountCode(t);
+                setDiscountApplied(false);
+              }}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              returnKeyType="done"
+              onSubmitEditing={handleApplyDiscount}
+            />
+            <Pressable
+              style={({ pressed }) => [styles.discountSendBtn, pressed && styles.discountSendBtnPressed]}
+              onPress={handleApplyDiscount}
+              hitSlop={6}
+              accessibilityLabel="Apply discount code"
+            >
+              <Ionicons name="send" size={20} color={BG_DARK} />
+            </Pressable>
+          </View>
+          {discountApplied && discountCode.trim() ? (
+            <Text style={styles.discountAppliedHint}>Code will be applied when you place the order.</Text>
+          ) : null}
         </View>
 
         {/* Payment: Cash on Delivery or Stripe */}
@@ -877,6 +976,41 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.15)',
     minHeight: 72,
     textAlignVertical: 'top',
+  },
+  discountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  discountInput: {
+    flex: 1,
+    minWidth: 0,
+    backgroundColor: CARD_BG,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    fontWeight: '600',
+    color: TEXT_WHITE,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  discountSendBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: GOLD,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  discountSendBtnPressed: {
+    opacity: 0.88,
+  },
+  discountAppliedHint: {
+    marginTop: 8,
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(254,203,77,0.85)',
   },
   bottomSpacer: {
     height: 20,

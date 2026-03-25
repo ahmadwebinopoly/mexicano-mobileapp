@@ -11,3 +11,4 @@ export { StoryScreenSkeleton } from './StoryScreenSkeleton';
 export { OrderDetailsScreenSkeleton } from './OrderDetailsScreenSkeleton';
 export { AddressScreenSkeleton } from './AddressScreenSkeleton';
 export { OrdersScreenSkeleton } from './OrdersScreenSkeleton';
+export { ViewOrderDetailsScreenSkeleton } from './ViewOrderDetailsScreenSkeleton';

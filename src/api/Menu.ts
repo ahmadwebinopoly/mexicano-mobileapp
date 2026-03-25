@@ -74,6 +74,25 @@ export async function fetchMenuItemsRaw(): Promise<{ rawText: string; rawJson: u
   return { rawText, rawJson };
 }
 
+/** Pick image from any common API shape (spread `...o` used to overwrite `image` with null). */
+function coalesceMenuImage(o: Record<string, unknown>): string | { uri: string } | undefined {
+  const img =
+    o.image ??
+    o.imageUrl ??
+    o.image_url ??
+    o.photo ??
+    o.thumbnail ??
+    o.thumbnailUrl ??
+    o.picture ??
+    o.img ??
+    o.coverImage;
+  if (typeof img === 'string' && img.trim()) return img.trim();
+  if (img && typeof img === 'object' && (img as { uri?: string }).uri) {
+    return { uri: String((img as { uri: string }).uri) };
+  }
+  return undefined;
+}
+
 function normalizeMenuItem(raw: unknown): MenuItem | null {
   if (!raw || typeof raw !== 'object') return null;
   const o = raw as Record<string, unknown>;
@@ -81,16 +100,12 @@ function normalizeMenuItem(raw: unknown): MenuItem | null {
   const name = o.name ?? o.itemName ?? o.title;
   if (id == null || name == null) return null;
   return {
+    ...o,
     id: String(id),
     name: String(name),
     description: o.description != null ? String(o.description) : undefined,
     price: o.price != null ? String(o.price) : '',
-    image: (() => {
-      const img = o.image;
-      if (typeof img === 'string' && img.trim()) return img;
-      if (img && typeof img === 'object' && (img as { uri?: string }).uri) return { uri: String((img as { uri: string }).uri) };
-      return undefined;
-    })(),
+    image: coalesceMenuImage(o),
     categoryId: o.categoryId != null ? String(o.categoryId) : undefined,
     rating: o.rating != null ? String(o.rating) : undefined,
     time: o.time != null ? String(o.time) : undefined,
@@ -98,8 +113,18 @@ function normalizeMenuItem(raw: unknown): MenuItem | null {
     cooking_time: o.cooking_time,
     prepTime: o.prepTime,
     preparationTime: o.preparationTime,
-    ...o,
   } as MenuItem;
+}
+
+/** Absolute or relative image URL for use with `Image` + `normalizeImageUri`. */
+export function getMenuItemImageUrlString(item: MenuItem): string | null {
+  const resolved = coalesceMenuImage(item as Record<string, unknown>);
+  if (typeof resolved === 'string' && resolved.trim()) return resolved.trim();
+  if (resolved && typeof resolved === 'object' && 'uri' in resolved) {
+    const u = String((resolved as { uri: string }).uri).trim();
+    return u || null;
+  }
+  return null;
 }
 
 let cachedMenuItems: MenuItem[] | null = null;
@@ -122,22 +147,30 @@ export async function getMenuItems(): Promise<MenuItem[]> {
 }
 
 function extractMenuItemsFromJson(json: MenuItemsResponse): MenuItem[] {
+  const j = json as Record<string, unknown> | unknown[] | null;
   let list: unknown[] | undefined;
-  if (Array.isArray(json)) {
-    list = json;
-  } else if (Array.isArray(json.data)) {
-    list = json.data;
-  } else if (Array.isArray(json.items)) {
-    list = json.items;
-  } else if (Array.isArray(json.menu)) {
-    list = json.menu;
-  } else if (Array.isArray(json.menuItems)) {
-    list = json.menuItems;
-  } else if (Array.isArray(json.result)) {
-    list = json.result;
-  } else if (json.data && typeof json.data === 'object' && Array.isArray((json.data as Record<string, unknown>).items)) {
-    list = (json.data as Record<string, unknown>).items as unknown[];
-  } else {
+  if (Array.isArray(j)) {
+    list = j;
+  } else if (j && typeof j === 'object') {
+    const o = j as Record<string, unknown>;
+    const data = o.data;
+    if (Array.isArray(o.items)) list = o.items;
+    else if (Array.isArray(o.menu)) list = o.menu;
+    else if (Array.isArray(o.menuItems)) list = o.menuItems;
+    else if (Array.isArray(o.result)) list = o.result;
+    else if (Array.isArray(data)) list = data;
+    else if (data && typeof data === 'object') {
+      const d = data as Record<string, unknown>;
+      if (Array.isArray(d.items)) list = d.items;
+      else if (Array.isArray(d.menu)) list = d.menu;
+      else if (Array.isArray(d.results)) list = d.results;
+    }
+    if (!list && o.result && typeof o.result === 'object') {
+      const r = o.result as Record<string, unknown>;
+      if (Array.isArray(r.items)) list = r.items;
+    }
+  }
+  if (!list) {
     list = [];
   }
   const out: MenuItem[] = [];
@@ -146,6 +179,11 @@ function extractMenuItemsFromJson(json: MenuItemsResponse): MenuItem[] {
     if (normalized) out.push(normalized);
   }
   return out;
+}
+
+/** Parse any JSON shape returned by GET /api/menu/items (same as getMenuItems). */
+export function parseMenuItemsFromApiJson(json: unknown): MenuItem[] {
+  return extractMenuItemsFromJson(json as MenuItemsResponse);
 }
 
 /** Returns normalized items and raw API response for preview/response display. */

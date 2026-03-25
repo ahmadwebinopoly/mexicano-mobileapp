@@ -13,7 +13,9 @@ import OrdersScreen from '../screens/main/OrdersScreen';
 import CheckoutScreen from '../screens/order/CheckoutScreen';
 import CartScreen from '../screens/main/CartScreen';
 import LoginRegisterScreen from '../screens/auth/LoginRegisterScreen';
-import ViewOrderDetailsScreen from '../screens/order/ViewOrderDetailsScreen.tsx';
+import ViewOrderDetailsScreen from '../screens/order/ViewOrderDetailsScreen';
+import ReviewsScreen from '../screens/main/ReviewsScreen';
+import RateYourFeastScreen from '../screens/main/RateYourFeastScreen';
 import type { ItemDetailParamItem } from '../screens/main/ItemDetailScreen';
 import { CartProvider } from '../contexts/CartContext';
 
@@ -35,6 +37,8 @@ export type RootStackParamList = {
   LoginRegister: { returnTo?: 'Checkout' } | undefined;
   Orders: { showOrderSuccessToast?: boolean } | undefined;
   ViewOrderDetails: { orderId: string };
+  Reviews: undefined;
+  RateYourFeast: { orderId: string; items: string; amount: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -72,6 +76,8 @@ export default function RootNavigator() {
         <Stack.Screen name="Map" component={MapScreen} />
         <Stack.Screen name="Orders" component={OrdersScreen} />
         <Stack.Screen name="ViewOrderDetails" component={ViewOrderDetailsScreen} />
+        <Stack.Screen name="Reviews" component={ReviewsScreen} />
+        <Stack.Screen name="RateYourFeast" component={RateYourFeastScreen} />
       </Stack.Navigator>
     </NavigationContainer>
     </CartProvider>

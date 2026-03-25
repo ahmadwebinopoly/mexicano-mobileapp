@@ -40,6 +40,8 @@ export default function AddressScreen() {
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [addErrors, setAddErrors] = useState<{ location?: string; fullAddress?: string }>({});
+  const [editErrors, setEditErrors] = useState<{ fullAddress?: string }>({});
 
   // Edit modal state
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -137,6 +139,7 @@ export default function AddressScreen() {
     setEditFloor(addr.floor || '');
     setEditHomeNo(addr.homeNo || '');
     setEditLabel(addr.customerLocation || 'Home');
+    setEditErrors({});
     setEditModalVisible(true);
   };
 
@@ -149,7 +152,7 @@ export default function AddressScreen() {
     if (!editingAddress) return;
 
     if (!editAddress.trim()) {
-      Alert.alert('Required', 'Full address is required.');
+      setEditErrors({ fullAddress: 'Full address is required.' });
       return;
     }
 
@@ -185,6 +188,7 @@ export default function AddressScreen() {
     setAddLatitude(null);
     setAddLongitude(null);
     setFetchedAddressText('');
+    setAddErrors({});
     setAddModalVisible(true);
   };
 
@@ -209,6 +213,7 @@ export default function AddressScreen() {
       const lng = location.coords.longitude;
       setAddLatitude(lat);
       setAddLongitude(lng);
+      setAddErrors((prev) => ({ ...prev, location: undefined }));
 
       const reverseGeo = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
       if (reverseGeo && reverseGeo.length > 0) {
@@ -235,12 +240,15 @@ export default function AddressScreen() {
   };
 
   const handleSaveNewAddress = async () => {
-    if (addLatitude == null || addLongitude == null) {
-      Alert.alert('Location Required', 'Please fetch your location first.');
+    const hasLocation = addLatitude != null && addLongitude != null;
+    const addressOk = !!addAddress.trim();
+    // Show only the first missing field to keep UX clean.
+    if (!hasLocation) {
+      setAddErrors({ location: 'Please fetch your location first.', fullAddress: undefined });
       return;
     }
-    if (!addAddress.trim()) {
-      Alert.alert('Required', 'Full address is required.');
+    if (!addressOk) {
+      setAddErrors({ fullAddress: 'Full address is required.', location: undefined });
       return;
     }
 
@@ -467,6 +475,7 @@ export default function AddressScreen() {
                   </>
                 )}
               </Pressable>
+              {addErrors.location ? <Text style={styles.fieldErrorText}>{addErrors.location}</Text> : null}
 
               {/* Fetched Location Display */}
               {addLatitude != null && addLongitude != null && (
@@ -495,14 +504,24 @@ export default function AddressScreen() {
               {/* Full Address */}
               <Text style={styles.inputLabel}>Full Address *</Text>
               <TextInput
-                style={[styles.input, styles.inputMultiline]}
+                style={[
+                  styles.input,
+                  styles.inputMultiline,
+                  addErrors.fullAddress ? styles.inputError : null,
+                ]}
                 value={addAddress}
-                onChangeText={setAddAddress}
+                onChangeText={(v) => {
+                  setAddAddress(v);
+                  setAddErrors((prev) => ({ ...prev, fullAddress: undefined }));
+                }}
                 placeholder="Enter full address"
                 placeholderTextColor={MUTED_TEXT}
                 multiline
                 numberOfLines={2}
               />
+              {addErrors.fullAddress ? (
+                <Text style={styles.fieldErrorText}>{addErrors.fullAddress}</Text>
+              ) : null}
 
               {/* City */}
               <Text style={styles.inputLabel}>City</Text>
@@ -612,14 +631,24 @@ export default function AddressScreen() {
               {/* Full Address */}
               <Text style={styles.inputLabel}>Full Address *</Text>
               <TextInput
-                style={[styles.input, styles.inputMultiline]}
+                style={[
+                  styles.input,
+                  styles.inputMultiline,
+                  editErrors.fullAddress ? styles.inputError : null,
+                ]}
                 value={editAddress}
-                onChangeText={setEditAddress}
+                onChangeText={(v) => {
+                  setEditAddress(v);
+                  setEditErrors((prev) => ({ ...prev, fullAddress: undefined }));
+                }}
                 placeholder="Enter full address"
                 placeholderTextColor={MUTED_TEXT}
                 multiline
                 numberOfLines={2}
               />
+              {editErrors.fullAddress ? (
+                <Text style={styles.fieldErrorText}>{editErrors.fullAddress}</Text>
+              ) : null}
 
               {/* City */}
               <Text style={styles.inputLabel}>City</Text>
@@ -1010,5 +1039,14 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: BG_DARK,
+  },
+  fieldErrorText: {
+    marginTop: 8,
+    color: '#EF4444',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  inputError: {
+    borderColor: 'rgba(239,68,68,0.9)',
   },
 });

@@ -180,13 +180,30 @@ export async function placeOrder(payload: PlaceOrderPayload): Promise<Order> {
     throw new Error('Not authenticated');
   }
 
+  // Match api/orders.ts: send both camelCase and snake_case; omit empty payment_id.
+  const { paymentMethod, paymentStatus, paymentId, ...rest } = payload;
+  const body: Record<string, unknown> = { ...rest };
+  if (paymentMethod != null && String(paymentMethod).trim() !== '') {
+    body.paymentMethod = paymentMethod;
+    body.payment_method = paymentMethod;
+  }
+  if (paymentStatus != null && String(paymentStatus).trim() !== '') {
+    body.paymentStatus = paymentStatus;
+    body.payment_status = paymentStatus;
+  }
+  const idTrim = paymentId != null ? String(paymentId).trim() : '';
+  if (idTrim) {
+    body.paymentId = idTrim;
+    body.payment_id = idTrim;
+  }
+
   const res = await fetch(ENDPOINTS.placeOrder, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
