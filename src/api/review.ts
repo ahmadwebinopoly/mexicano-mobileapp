@@ -164,6 +164,15 @@ export interface AdminReviewsPageResponse {
   reviews: AdminReviewRow[];
 }
 
+export interface ProductSummaryItem {
+  count: number;
+  averageOverall: number;
+}
+
+export interface ProductSummaryResponse {
+  items: Record<string, ProductSummaryItem>;
+}
+
 function buildQuery(params: Record<string, string | number | undefined>): string {
   const q = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => {
@@ -377,6 +386,33 @@ export async function getReviewsAdminPage(
   }
 
   throw new Error(await readErrorMessage(first));
+}
+
+/**
+ * GET /api/reviews/product-summary?ids=12,15,99
+ * Public endpoint that returns count + averageOverall keyed by product id.
+ */
+export async function getProductReviewsSummary(ids: Array<string | number>): Promise<ProductSummaryResponse> {
+  const uniqueIds = Array.from(
+    new Set(
+      ids
+        .map((id) => String(id).trim())
+        .filter(Boolean)
+    )
+  );
+  if (uniqueIds.length === 0) {
+    return { items: {} };
+  }
+  const q = new URLSearchParams();
+  q.set('ids', uniqueIds.join(','));
+  const url = `${baseUrl()}/product-summary?${q.toString()}`;
+  const res = await fetch(url, { method: 'GET' });
+  if (!res.ok) {
+    throw new Error(await readErrorMessage(res));
+  }
+  const data = (await res.json()) as ProductSummaryResponse;
+  const items = data?.items && typeof data.items === 'object' ? data.items : {};
+  return { items };
 }
 
 /**

@@ -17,6 +17,7 @@ import { getMenuItems, getCachedMenuItems, type MenuItem as ApiMenuItem } from '
 import { getNetworkErrorMessage } from '../../api/apiConfig';
 import { MenuScreenSkeleton } from '../../components/skeleton/MenuScreenSkeleton';
 import { addToWishlist } from '../../api/wishlist';
+import { getProductReviewsSummary } from '../../api/review';
 import { getToken } from '../../storagetank';
 import { navigateToLoginRegister } from '../../navigation/rootNavigationRef';
 import { useCart } from '../../contexts/CartContext';
@@ -47,7 +48,9 @@ export interface MenuProduct {
   name: string;
   description: string;
   price: string;
-  rating: string;
+  rating?: string;
+  ratingValue?: number | null;
+  reviewsCount?: number | null;
   time: string;
   /** API image URL when present; null = no image → show skeleton */
   image: { uri: string } | null;
@@ -67,6 +70,51 @@ interface ProductCardProps {
   onWishlistPress: (item: MenuProduct) => void;
   onQuickAdd: (item: MenuProduct) => void;
   wishlistUpdating: boolean;
+}
+
+function parseOptionalNumber(value: unknown): number | null {
+  if (value == null) return null;
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function formatReviewCountCompact(count: number): string {
+  return String(Math.max(0, Math.round(count)));
+}
+
+function getDisplayRating(item: MenuProduct): string {
+  const ratingValue = parseOptionalNumber(item.ratingValue);
+  const reviewsCount = parseOptionalNumber(item.reviewsCount);
+  if (ratingValue != null && ratingValue > 0) {
+    return `${ratingValue.toFixed(1)} (${formatReviewCountCompact(reviewsCount ?? 0)})`;
+  }
+  return '';
+}
+
+function clampRating0to5(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(5, n));
+}
+
+function getStarIconNames(avg: number): Array<React.ComponentProps<typeof Ionicons>['name']> {
+  const a = clampRating0to5(avg);
+  const rounded = Math.round(a * 2) / 2;
+  const full = Math.floor(rounded);
+  const half = rounded - full >= 0.5 ? 1 : 0;
+  const empty = Math.max(0, 5 - full - half);
+  return [
+    ...Array.from({ length: full }, () => 'star' as const),
+    ...Array.from({ length: half }, () => 'star-half' as const),
+    ...Array.from({ length: empty }, () => 'star-outline' as const),
+  ];
+}
+
+function getStarIconNamesForItem(item: MenuProduct): Array<React.ComponentProps<typeof Ionicons>['name']> {
+  const avg = parseOptionalNumber(item.ratingValue);
+  if (avg == null || avg <= 0) {
+    return Array.from({ length: 5 }, () => 'star-outline' as const);
+  }
+  return getStarIconNames(avg);
 }
 
 const ProductCard = memo(function ProductCard({
@@ -127,8 +175,14 @@ const ProductCard = memo(function ProductCard({
         <Text style={styles.productDesc} numberOfLines={2}>{item.description}</Text>
         <View style={styles.productMetaRow}>
           <View style={styles.metaItem}>
-            <Ionicons name="star" size={14} color="#F8AC01" />
-            <Text style={styles.metaText} numberOfLines={1}>{item.rating}</Text>
+            <View style={styles.metaStarsRow}>
+              {getStarIconNamesForItem(item).map((name, i) => (
+                <Ionicons key={`${item.id}-star-${i}-${name}`} name={name} size={13} color="#F8AC01" />
+              ))}
+            </View>
+            {getDisplayRating(item) ? (
+              <Text style={styles.metaText} numberOfLines={1}>{getDisplayRating(item)}</Text>
+            ) : null}
           </View>
           <View style={styles.metaItem}>
             <MaterialIcons name="access-time" size={14} color={GOLD} />
@@ -169,7 +223,7 @@ function mapApiItemToMenuProduct(item: ApiMenuItem & { addons?: unknown[] }): Me
     name: String(item.name ?? ''),
     description: item.description != null ? String(item.description) : 'Delicious Mexican-style dish.',
     price: item.price != null ? String(item.price) : '',
-    rating: item.rating != null ? String(item.rating) : '4.9 (10K+)',
+    rating: item.rating != null ? String(item.rating) : undefined,
     time: cookingTimeStr,
     cookingTime: cookingTimeStr,
     image,
@@ -186,6 +240,7 @@ export default function MenuScreen() {
   const [error, setError] = useState<string | null>(null);
   const navigation = useNavigation<Nav>();
   const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set());
+  const [ratingById, setRatingById] = useState<Record<string, { avg: number; count: number }>>({});
 
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const toastOpacity = useRef(new Animated.Value(0)).current;
@@ -293,15 +348,48 @@ export default function MenuScreen() {
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const ids = menuProducts.map((p) => String(p.id).trim()).filter(Boolean);
+        if (ids.length === 0) {
+          if (!cancelled) setRatingById({});
+          return;
+        }
+        const summary = await getProductReviewsSummary(ids);
+        if (cancelled) return;
+        const next: Record<string, { avg: number; count: number }> = {};
+        Object.entries(summary.items || {}).forEach(([id, row]) => {
+          const count = parseOptionalNumber((row as { count?: unknown }).count) ?? 0;
+          const avg = parseOptionalNumber((row as { averageOverall?: unknown }).averageOverall) ?? 0;
+          if (count > 0 && avg > 0) next[String(id).trim()] = { avg, count };
+        });
+        setRatingById(next);
+      } catch {
+        if (!cancelled) setRatingById({});
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [menuProducts]);
+
   const filteredProducts = useMemo(() => {
+    const base = menuProducts.map((p) => {
+      const stat = ratingById[String(p.id).trim()];
+      return stat
+        ? { ...p, ratingValue: stat.avg, reviewsCount: stat.count }
+        : { ...p, ratingValue: null, reviewsCount: null };
+    });
     const q = normalizeSearchText(searchQuery);
-    if (!q) return menuProducts;
-    return menuProducts.filter(
+    if (!q) return base;
+    return base.filter(
       (p) =>
         normalizeSearchText(p.name).includes(q) ||
         normalizeSearchText(p.description).includes(q)
     );
-  }, [menuProducts, searchQuery]);
+  }, [menuProducts, searchQuery, ratingById]);
 
   const renderProductItem = useCallback(
     ({ item }: { item: MenuProduct }) => {
@@ -541,6 +629,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+  },
+  metaStarsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 1,
   },
   metaText: {
     fontSize: 10,

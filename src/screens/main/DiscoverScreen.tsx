@@ -43,7 +43,7 @@ import { getToken } from '../../storagetank';
 import { addToWishlist, getWishlist } from '../../api/wishlist';
 import { getOrderModes } from '../../api/orderModes';
 import { useCart } from '../../contexts/CartContext';
-import { getReviewsAdminPage } from '../../api/review';
+import { getProductReviewsSummary } from '../../api/review';
 
 const BG_DARK = '#0B1D1B';
 const CARD_BG = '#152C29';
@@ -177,65 +177,6 @@ function formatReviewCountCompact(count: number): string {
   return String(Math.max(0, Math.round(count)));
 }
 
-function normalizeDishKey(s: string): string {
-  return String(s ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/\(.*?\)/g, ' ')
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ');
-}
-
-function readStringFromRecord(obj: Record<string, unknown>, keys: string[]): string {
-  for (const key of keys) {
-    const value = obj[key];
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  }
-  return '';
-}
-
-function readNumberFromRecord(obj: Record<string, unknown>, keys: string[]): number | null {
-  for (const key of keys) {
-    const value = parseOptionalNumber(obj[key]);
-    if (value != null && value > 0) return value;
-  }
-  return null;
-}
-
-function extractReviewsArray(payload: unknown): Record<string, unknown>[] {
-  if (Array.isArray(payload)) return payload.filter((x) => x && typeof x === 'object') as Record<string, unknown>[];
-  if (!payload || typeof payload !== 'object') return [];
-  const obj = payload as Record<string, unknown>;
-  const candidates = [
-    obj.reviews,
-    obj.data,
-    (obj.data as Record<string, unknown> | undefined)?.reviews,
-    (obj.data as Record<string, unknown> | undefined)?.data,
-    obj.rows,
-    obj.results,
-  ];
-  for (const c of candidates) {
-    if (Array.isArray(c)) return c.filter((x) => x && typeof x === 'object') as Record<string, unknown>[];
-  }
-  return [];
-}
-
-function extractItemKeysFromOrderSummary(summary: string): string[] {
-  const text = String(summary ?? '').trim();
-  if (!text) return [];
-  return text
-    .split(',')
-    .map((part) =>
-      part
-        .replace(/\[.*?\]/g, '')
-        .replace(/\s*x\d+\b/gi, '')
-        .replace(/\s+/g, ' ')
-        .trim()
-    )
-    .filter(Boolean)
-    .map((name) => normalizeDishKey(name));
-}
-
 function getDisplayRating(item: DiscoverMenuItem): string {
   const ratingValue = parseOptionalNumber(item.ratingValue);
   const reviewsCount = parseOptionalNumber(item.reviewsCount);
@@ -269,7 +210,9 @@ function getStarIconNamesForItem(
   item: DiscoverMenuItem
 ): Array<React.ComponentProps<typeof MaterialIcons>['name']> {
   const avg = parseOptionalNumber(item.ratingValue);
-  if (avg == null || avg <= 0) return [];
+  if (avg == null || avg <= 0) {
+    return Array.from({ length: 5 }, () => 'star-border' as const);
+  }
   return getStarIconNames(avg);
 }
 
@@ -558,58 +501,25 @@ export default function DiscoverScreen() {
   const [headerHeight, setHeaderHeight] = useState(0);
   const [dishRatingStats, setDishRatingStats] = useState<Record<string, { avg: number; count: number }>>({});
 
-  // Fetch admin reviews and aggregate product rating by order items summary.
+  // Fetch per-product summary directly by ids.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const first = await getReviewsAdminPage(1, 15);
-        if (cancelled) return;
-
-        const page = Number(first?.page) || 1;
-        const pageSize = Number(first?.pageSize) || 15;
-        const total = Number(first?.total) || 0;
-        const totalPages = Math.max(1, Math.ceil(total / Math.max(1, pageSize)));
-
-        let rows: Record<string, unknown>[] = Array.isArray(first?.reviews)
-          ? (first.reviews as unknown as Record<string, unknown>[])
-          : extractReviewsArray(first);
-
-        const maxPages = Math.min(totalPages, 20);
-        for (let p = page + 1; p <= maxPages; p += 1) {
-          const next = await getReviewsAdminPage(p, pageSize);
-          if (cancelled) return;
-          const nextRows: Record<string, unknown>[] = Array.isArray(next?.reviews)
-            ? (next.reviews as unknown as Record<string, unknown>[])
-            : extractReviewsArray(next);
-          rows = rows.concat(nextRows);
+        const ids = allItems.map((it) => String(it.id ?? '').trim()).filter(Boolean);
+        if (ids.length === 0) {
+          if (!cancelled) setDishRatingStats({});
+          return;
         }
+        const summary = await getProductReviewsSummary(ids);
         if (cancelled) return;
-
-        const agg: Record<string, { sum: number; count: number }> = {};
-        for (const r of rows) {
-          const ratingNum = readNumberFromRecord(r, [
-            'overallRating',
-            'overall_rating',
-            'rating',
-            'avgRating',
-            'avg_rating',
-          ]);
-          if (ratingNum == null || ratingNum <= 0) continue;
-
-          const itemKeys = extractItemKeysFromOrderSummary(
-            readStringFromRecord(r, ['orderItemsSummary', 'order_items_summary', 'items'])
-          );
-          for (const key of itemKeys) {
-            if (!agg[key]) agg[key] = { sum: 0, count: 0 };
-            agg[key].sum += ratingNum;
-            agg[key].count += 1;
-          }
-        }
-
         const stats: Record<string, { avg: number; count: number }> = {};
-        Object.entries(agg).forEach(([k, v]) => {
-          if (v.count > 0) stats[k] = { avg: v.sum / v.count, count: v.count };
+        Object.entries(summary.items || {}).forEach(([id, row]) => {
+          const count = parseOptionalNumber((row as { count?: unknown }).count) ?? 0;
+          const avg = parseOptionalNumber((row as { averageOverall?: unknown }).averageOverall) ?? 0;
+          if (count > 0 && avg > 0) {
+            stats[String(id).trim()] = { avg, count };
+          }
         });
         setDishRatingStats(stats);
       } catch {
@@ -619,7 +529,7 @@ export default function DiscoverScreen() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [allItems]);
 
   const menuSections = React.useMemo(
     () => {
@@ -628,11 +538,8 @@ export default function DiscoverScreen() {
       return base.map((section) => ({
         ...section,
         items: section.items.map((it) => {
-          const nameKey = normalizeDishKey(it.name);
-          const stat =
-            (nameKey && dishRatingStats[nameKey]) ||
-            Object.entries(dishRatingStats).find(([k]) => k.includes(nameKey) || nameKey.includes(k))?.[1] ||
-            undefined;
+          const idKey = String(it.id ?? '').trim();
+          const stat = idKey ? dishRatingStats[idKey] : undefined;
           if (!stat || !(stat.count > 0) || !(stat.avg > 0)) return it;
           return {
             ...it,

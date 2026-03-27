@@ -19,6 +19,7 @@ import type { RootStackParamList } from '../../navigation/RootNavigator';
 import type { AddonItem } from '../../api/itemDetail';
 import { useCart } from '../../contexts/CartContext';
 import { ItemDetailScreenSkeleton, SkeletonBox } from '../../components/skeleton';
+import { getProductReviewsSummary } from '../../api/review';
 import {
   getAllAddresses,
   getAddress,
@@ -64,6 +65,8 @@ export type ItemDetailParamItem = {
   price: string;
   image: { uri: string } | null;
   rating?: string;
+  ratingValue?: number | null;
+  reviewsCount?: number | null;
   /** Cooking/prep time from API (e.g. "10-15 mins"). */
   cookingTime?: string;
   time?: string;
@@ -75,6 +78,34 @@ function formatPrice(price: string): string {
   if (price == null || String(price).trim() === '') return '$0.00';
   const p = String(price).trim();
   return p.startsWith('$') ? p : `$${p}`;
+}
+
+function parseOptionalNumber(value: unknown): number | null {
+  if (value == null) return null;
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function formatReviewCountCompact(count: number): string {
+  return String(Math.max(0, Math.round(count)));
+}
+
+function clampRating0to5(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(5, n));
+}
+
+function getStarIconNames(avg: number): Array<React.ComponentProps<typeof Ionicons>['name']> {
+  const a = clampRating0to5(avg);
+  const rounded = Math.round(a * 2) / 2;
+  const full = Math.floor(rounded);
+  const half = rounded - full >= 0.5 ? 1 : 0;
+  const empty = Math.max(0, 5 - full - half);
+  return [
+    ...Array.from({ length: full }, () => 'star' as const),
+    ...Array.from({ length: half }, () => 'star-half' as const),
+    ...Array.from({ length: empty }, () => 'star-outline' as const),
+  ];
 }
 
 /** Normalize raw addon from items API to AddonItem for display. */
@@ -118,6 +149,7 @@ export default function ItemDetailScreen() {
   const [addressesLoading, setAddressesLoading] = useState(true);
   const [chooseAddressModalVisible, setChooseAddressModalVisible] = useState(false);
   const [orderMode, setOrderMode] = useState<OrderMode>('delivery');
+  const [productRating, setProductRating] = useState<{ avg: number; count: number } | null>(null);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -157,6 +189,34 @@ export default function ItemDetailScreen() {
     const t = setTimeout(() => setShowSkeleton(false), 450);
     return () => clearTimeout(t);
   }, [item]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const id = String(item?.id ?? '').trim();
+        if (!id) {
+          if (!cancelled) setProductRating(null);
+          return;
+        }
+        const summary = await getProductReviewsSummary([id]);
+        if (cancelled) return;
+        const row = summary.items?.[id];
+        const count = parseOptionalNumber((row as { count?: unknown } | undefined)?.count) ?? 0;
+        const avg = parseOptionalNumber((row as { averageOverall?: unknown } | undefined)?.averageOverall) ?? 0;
+        if (count > 0 && avg > 0) {
+          setProductRating({ avg, count });
+        } else {
+          setProductRating(null);
+        }
+      } catch {
+        if (!cancelled) setProductRating(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [item?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -283,8 +343,20 @@ export default function ItemDetailScreen() {
           <Text style={styles.itemDesc} numberOfLines={2}>{item.description}</Text>
           <View style={styles.metaRow}>
             <View style={styles.metaItem}>
-              <Ionicons name="star" size={14} color="#F8AC01" />
-              <Text style={styles.metaText}>{item.rating ?? '4.9 (10K+)'}</Text>
+              <View style={styles.metaStarsRow}>
+                {(
+                  productRating
+                    ? getStarIconNames(productRating.avg)
+                    : Array.from({ length: 5 }, () => 'star-outline' as const)
+                ).map((name, i) => (
+                  <Ionicons key={`${item.id}-star-${i}-${name}`} name={name} size={13} color="#F8AC01" />
+                ))}
+              </View>
+              {productRating ? (
+                <Text style={styles.metaText}>
+                  {`${productRating.avg.toFixed(1)} (${formatReviewCountCompact(productRating.count)})`}
+                </Text>
+              ) : null}
             </View>
             <View style={styles.metaItem}>
               <MaterialIcons name="access-time" size={14} color={GOLD} />
@@ -582,6 +654,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+  },
+  metaStarsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 1,
   },
   metaText: {
     fontSize: 12,
