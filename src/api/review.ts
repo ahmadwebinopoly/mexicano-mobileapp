@@ -103,6 +103,10 @@ export interface Review {
   id: string;
   orderId: string;
   userId?: string;
+  orderType?: 'Delivery' | 'Pickup' | 'Dine In' | string;
+  dishRating?: number;
+  dishTag?: string;
+  experience?: Record<string, number>;
   overallRating: number;
   foodQualityRating?: number;
   servicesRating?: number;
@@ -116,13 +120,25 @@ export interface Review {
 
 export interface SubmitReviewPayload {
   orderId: string;
-  overallRating: number;
-  foodQualityRating?: number;
-  servicesRating?: number;
-  tags?: string[];
+  orderType: 'Delivery' | 'Pickup' | 'Dine In';
+  dishRating: number;
+  dishTag?: string;
   comment?: string;
-  /** Max 5 entries (URLs or base64), per backend. */
-  photoUrls?: string[];
+  experience: {
+    foodQuality: number;
+    deliverySpeed?: number;
+    pickupSpeed?: number;
+    packaging?: number;
+    staffService?: number;
+    ambience?: number;
+  };
+}
+
+export interface SubmitReviewResponse {
+  success: boolean;
+  message: string;
+  reviewId?: string;
+  errors?: string[];
 }
 
 export type ReviewModerationStatus = 'published' | 'pending' | 'rejected' | 'hidden';
@@ -133,6 +149,21 @@ export interface ListAdminReviewsParams {
   status?: ReviewModerationStatus | string;
 }
 
+export interface AdminReviewRow {
+  id: string;
+  overallRating?: number;
+  orderItemsSummary?: string;
+  status?: string;
+  [key: string]: unknown;
+}
+
+export interface AdminReviewsPageResponse {
+  page: number;
+  pageSize: number;
+  total: number;
+  reviews: AdminReviewRow[];
+}
+
 function buildQuery(params: Record<string, string | number | undefined>): string {
   const q = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => {
@@ -140,6 +171,10 @@ function buildQuery(params: Record<string, string | number | undefined>): string
   });
   const s = q.toString();
   return s ? `?${s}` : '';
+}
+
+function isWholeRating(n: number | undefined): boolean {
+  return typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= 5;
 }
 
 /**
@@ -173,7 +208,7 @@ export async function listReviews(params: ListReviewsParams = {}): Promise<{ rev
 /**
  * POST /api/reviews — Bearer. Create or update (upsert). Order must be Delivered; customer must match user.
  */
-export async function submitReview(payload: SubmitReviewPayload): Promise<Review> {
+export async function submitReview(payload: SubmitReviewPayload): Promise<SubmitReviewResponse> {
   const token = await getToken();
   if (!token) {
     throw new Error('Not authenticated');
@@ -184,38 +219,39 @@ export async function submitReview(payload: SubmitReviewPayload): Promise<Review
     throw new Error('Missing order id — go back and open the review from your order list.');
   }
 
-  /**
-   * Send camelCase + snake_case (same pattern as `orders.ts` / `placeOrder`).
-   * Many PHP/Node handlers only bind snake_case; missing columns can surface as 500 instead of 400.
-   */
+  const orderType = payload.orderType;
+  if (orderType !== 'Delivery' && orderType !== 'Pickup' && orderType !== 'Dine In') {
+    throw new Error('orderType must be Delivery, Pickup, or Dine In.');
+  }
+  if (!isWholeRating(payload.dishRating)) {
+    throw new Error('dishRating must be a whole number between 1 and 5.');
+  }
+  if (!isWholeRating(payload.experience.foodQuality)) {
+    throw new Error('experience.foodQuality must be a whole number between 1 and 5.');
+  }
+
+  if (orderType === 'Delivery') {
+    if (!isWholeRating(payload.experience.deliverySpeed) || !isWholeRating(payload.experience.packaging)) {
+      throw new Error('For Delivery, experience.deliverySpeed and experience.packaging are required (1..5).');
+    }
+  } else if (orderType === 'Pickup') {
+    if (!isWholeRating(payload.experience.pickupSpeed) || !isWholeRating(payload.experience.packaging)) {
+      throw new Error('For Pickup, experience.pickupSpeed and experience.packaging are required (1..5).');
+    }
+  } else {
+    if (!isWholeRating(payload.experience.staffService) || !isWholeRating(payload.experience.ambience)) {
+      throw new Error('For Dine In, experience.staffService and experience.ambience are required (1..5).');
+    }
+  }
+
   const body: Record<string, unknown> = {
     orderId: oid,
-    order_id: oid,
-    overallRating: payload.overallRating,
-    overall_rating: payload.overallRating,
+    orderType,
+    dishRating: payload.dishRating,
+    dishTag: payload.dishTag?.trim() || undefined,
+    comment: payload.comment?.trim() || undefined,
+    experience: payload.experience,
   };
-
-  if (payload.foodQualityRating != null && payload.foodQualityRating >= 1 && payload.foodQualityRating <= 5) {
-    body.foodQualityRating = payload.foodQualityRating;
-    body.food_quality_rating = payload.foodQualityRating;
-  }
-  if (payload.servicesRating != null && payload.servicesRating >= 1 && payload.servicesRating <= 5) {
-    body.servicesRating = payload.servicesRating;
-    body.services_rating = payload.servicesRating;
-  }
-  if (payload.tags && payload.tags.length > 0) {
-    body.tags = payload.tags;
-  }
-  const trimmed = payload.comment?.trim();
-  if (trimmed) {
-    const c = trimmed.slice(0, 2000);
-    body.comment = c;
-  }
-  if (payload.photoUrls && payload.photoUrls.length > 0) {
-    const urls = payload.photoUrls.slice(0, 5);
-    body.photoUrls = urls;
-    body.photo_urls = urls;
-  }
 
   const res = await fetch(baseUrl(), {
     method: 'POST',
@@ -232,10 +268,17 @@ export async function submitReview(payload: SubmitReviewPayload): Promise<Review
   if (!res.ok) {
     throw new Error(messageFromErrorBody(responseText, res.status));
   }
-
-  throwIfSuccessEnvelopeFalse(responseText, res.status);
-
-  return parseReviewFromSuccessBody(responseText, { orderId: oid, overallRating: payload.overallRating });
+  if (!responseText.trim()) {
+    return { success: true, message: 'Review submitted successfully' };
+  }
+  const parsed = JSON.parse(responseText) as SubmitReviewResponse;
+  if (parsed?.success === false) {
+    if (Array.isArray(parsed.errors) && parsed.errors.length > 0) {
+      throw new Error(parsed.errors[0]);
+    }
+    throw new Error(parsed.message || 'Invalid review payload');
+  }
+  return parsed;
 }
 
 /**
@@ -301,6 +344,39 @@ export async function listReviewsAdmin(params: ListAdminReviewsParams = {}): Pro
     throw new Error(await readErrorMessage(res));
   }
   return res.json();
+}
+
+/**
+ * GET /api/reviews/admin page helper for product rating UI.
+ * Tries public first, retries with Bearer if endpoint requires auth.
+ */
+export async function getReviewsAdminPage(
+  page: number = 1,
+  pageSize: number = 15
+): Promise<AdminReviewsPageResponse> {
+  const q = buildQuery({ page, pageSize });
+  const url = `${baseUrl()}/admin${q}`;
+
+  const first = await fetch(url, { method: 'GET' });
+  if (first.ok) {
+    return (await first.json()) as AdminReviewsPageResponse;
+  }
+
+  if (first.status === 401 || first.status === 403) {
+    const token = await getToken();
+    if (token) {
+      const second = await fetch(url, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!second.ok) {
+        throw new Error(await readErrorMessage(second));
+      }
+      return (await second.json()) as AdminReviewsPageResponse;
+    }
+  }
+
+  throw new Error(await readErrorMessage(first));
 }
 
 /**

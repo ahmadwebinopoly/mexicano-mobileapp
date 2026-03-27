@@ -43,6 +43,7 @@ import { getToken } from '../../storagetank';
 import { addToWishlist, getWishlist } from '../../api/wishlist';
 import { getOrderModes } from '../../api/orderModes';
 import { useCart } from '../../contexts/CartContext';
+import { getReviewsAdminPage } from '../../api/review';
 
 const BG_DARK = '#0B1D1B';
 const CARD_BG = '#152C29';
@@ -173,8 +174,66 @@ function parseOptionalNumber(value: unknown): number | null {
 }
 
 function formatReviewCountCompact(count: number): string {
-  if (count >= 1000) return `${Math.round(count / 1000)}K+`;
   return String(Math.max(0, Math.round(count)));
+}
+
+function normalizeDishKey(s: string): string {
+  return String(s ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\(.*?\)/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
+function readStringFromRecord(obj: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function readNumberFromRecord(obj: Record<string, unknown>, keys: string[]): number | null {
+  for (const key of keys) {
+    const value = parseOptionalNumber(obj[key]);
+    if (value != null && value > 0) return value;
+  }
+  return null;
+}
+
+function extractReviewsArray(payload: unknown): Record<string, unknown>[] {
+  if (Array.isArray(payload)) return payload.filter((x) => x && typeof x === 'object') as Record<string, unknown>[];
+  if (!payload || typeof payload !== 'object') return [];
+  const obj = payload as Record<string, unknown>;
+  const candidates = [
+    obj.reviews,
+    obj.data,
+    (obj.data as Record<string, unknown> | undefined)?.reviews,
+    (obj.data as Record<string, unknown> | undefined)?.data,
+    obj.rows,
+    obj.results,
+  ];
+  for (const c of candidates) {
+    if (Array.isArray(c)) return c.filter((x) => x && typeof x === 'object') as Record<string, unknown>[];
+  }
+  return [];
+}
+
+function extractItemKeysFromOrderSummary(summary: string): string[] {
+  const text = String(summary ?? '').trim();
+  if (!text) return [];
+  return text
+    .split(',')
+    .map((part) =>
+      part
+        .replace(/\[.*?\]/g, '')
+        .replace(/\s*x\d+\b/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+    )
+    .filter(Boolean)
+    .map((name) => normalizeDishKey(name));
 }
 
 function getDisplayRating(item: DiscoverMenuItem): string {
@@ -183,17 +242,35 @@ function getDisplayRating(item: DiscoverMenuItem): string {
 
   if (ratingValue != null && ratingValue > 0) {
     const ratingText = ratingValue.toFixed(1);
-    if (reviewsCount != null && reviewsCount > 0) {
-      return `${ratingText} (${formatReviewCountCompact(reviewsCount)})`;
-    }
-    return ratingText;
+    return `${ratingText} (${formatReviewCountCompact(reviewsCount ?? 0)})`;
   }
+  return '';
+}
 
-  const fallback = (item.rating ?? '').toString().trim();
-  if (fallback) return fallback;
+function clampRating0to5(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(5, n));
+}
 
-  // Until ratings API is fully integrated, keep static UX fallback.
-  return '4.9 (10K+)';
+function getStarIconNames(avg: number): Array<React.ComponentProps<typeof MaterialIcons>['name']> {
+  const a = clampRating0to5(avg);
+  const rounded = Math.round(a * 2) / 2;
+  const full = Math.floor(rounded);
+  const half = rounded - full >= 0.5 ? 1 : 0;
+  const empty = Math.max(0, 5 - full - half);
+  return [
+    ...Array.from({ length: full }, () => 'star' as const),
+    ...Array.from({ length: half }, () => 'star-half' as const),
+    ...Array.from({ length: empty }, () => 'star-border' as const),
+  ];
+}
+
+function getStarIconNamesForItem(
+  item: DiscoverMenuItem
+): Array<React.ComponentProps<typeof MaterialIcons>['name']> {
+  const avg = parseOptionalNumber(item.ratingValue);
+  if (avg == null || avg <= 0) return [];
+  return getStarIconNames(avg);
 }
 
 /** Raw addon from items API (linked to menu item). */
@@ -479,10 +556,93 @@ export default function DiscoverScreen() {
   const [showStickyTabs, setShowStickyTabs] = useState(false);
   const prevStickyRef = useRef(false);
   const [headerHeight, setHeaderHeight] = useState(0);
+  const [dishRatingStats, setDishRatingStats] = useState<Record<string, { avg: number; count: number }>>({});
+
+  // Fetch admin reviews and aggregate product rating by order items summary.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const first = await getReviewsAdminPage(1, 15);
+        if (cancelled) return;
+
+        const page = Number(first?.page) || 1;
+        const pageSize = Number(first?.pageSize) || 15;
+        const total = Number(first?.total) || 0;
+        const totalPages = Math.max(1, Math.ceil(total / Math.max(1, pageSize)));
+
+        let rows: Record<string, unknown>[] = Array.isArray(first?.reviews)
+          ? (first.reviews as unknown as Record<string, unknown>[])
+          : extractReviewsArray(first);
+
+        const maxPages = Math.min(totalPages, 20);
+        for (let p = page + 1; p <= maxPages; p += 1) {
+          const next = await getReviewsAdminPage(p, pageSize);
+          if (cancelled) return;
+          const nextRows: Record<string, unknown>[] = Array.isArray(next?.reviews)
+            ? (next.reviews as unknown as Record<string, unknown>[])
+            : extractReviewsArray(next);
+          rows = rows.concat(nextRows);
+        }
+        if (cancelled) return;
+
+        const agg: Record<string, { sum: number; count: number }> = {};
+        for (const r of rows) {
+          const ratingNum = readNumberFromRecord(r, [
+            'overallRating',
+            'overall_rating',
+            'rating',
+            'avgRating',
+            'avg_rating',
+          ]);
+          if (ratingNum == null || ratingNum <= 0) continue;
+
+          const itemKeys = extractItemKeysFromOrderSummary(
+            readStringFromRecord(r, ['orderItemsSummary', 'order_items_summary', 'items'])
+          );
+          for (const key of itemKeys) {
+            if (!agg[key]) agg[key] = { sum: 0, count: 0 };
+            agg[key].sum += ratingNum;
+            agg[key].count += 1;
+          }
+        }
+
+        const stats: Record<string, { avg: number; count: number }> = {};
+        Object.entries(agg).forEach(([k, v]) => {
+          if (v.count > 0) stats[k] = { avg: v.sum / v.count, count: v.count };
+        });
+        setDishRatingStats(stats);
+      } catch {
+        if (!cancelled) setDishRatingStats({});
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const menuSections = React.useMemo(
-    () => buildMenuSections(categories, allItems),
-    [categories, allItems]
+    () => {
+      const base = buildMenuSections(categories, allItems);
+      // Overlay dynamic ratings where possible (prefer product id, fallback to name).
+      return base.map((section) => ({
+        ...section,
+        items: section.items.map((it) => {
+          const nameKey = normalizeDishKey(it.name);
+          const stat =
+            (nameKey && dishRatingStats[nameKey]) ||
+            Object.entries(dishRatingStats).find(([k]) => k.includes(nameKey) || nameKey.includes(k))?.[1] ||
+            undefined;
+          if (!stat || !(stat.count > 0) || !(stat.avg > 0)) return it;
+          return {
+            ...it,
+            ratingValue: stat.avg,
+            reviewsCount: stat.count,
+          };
+        }),
+      }));
+    },
+    [categories, allItems, dishRatingStats]
   );
 
   const isSearching = searchQuery.trim().length > 0;
@@ -1308,10 +1468,16 @@ export default function DiscoverScreen() {
                 >
                   <View style={styles.productGridTopRow}>
                     <View style={styles.productGridTopLeftRow}>
-                      <MaterialIcons name="star" size={18} color={GOLD} />
-                      <Text style={styles.productGridRating} numberOfLines={1}>
-                        {getDisplayRating(left)}
-                      </Text>
+                      <View style={styles.productGridStarsRow}>
+                        {getStarIconNamesForItem(left).map((name, i) => (
+                          <MaterialIcons key={`${left.id}-star-${i}-${name}`} name={name} size={16} color={GOLD} />
+                        ))}
+                      </View>
+                      {getDisplayRating(left) ? (
+                        <Text style={styles.productGridRating} numberOfLines={1}>
+                          {getDisplayRating(left)}
+                        </Text>
+                      ) : null}
                     </View>
                   </View>
 
@@ -1353,10 +1519,16 @@ export default function DiscoverScreen() {
                 >
                   <View style={styles.productGridTopRow}>
                     <View style={styles.productGridTopLeftRow}>
-                      <MaterialIcons name="star" size={18} color={GOLD} />
-                      <Text style={styles.productGridRating} numberOfLines={1}>
-                        {getDisplayRating(right)}
-                      </Text>
+                      <View style={styles.productGridStarsRow}>
+                        {getStarIconNamesForItem(right).map((name, i) => (
+                          <MaterialIcons key={`${right.id}-star-${i}-${name}`} name={name} size={16} color={GOLD} />
+                        ))}
+                      </View>
+                      {getDisplayRating(right) ? (
+                        <Text style={styles.productGridRating} numberOfLines={1}>
+                          {getDisplayRating(right)}
+                        </Text>
+                      ) : null}
                     </View>
                   </View>
 
@@ -1953,6 +2125,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+  },
+  productGridStarsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 1,
   },
   productGridRating: {
     fontSize: 11,

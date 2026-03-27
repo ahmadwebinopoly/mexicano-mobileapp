@@ -9,6 +9,7 @@ import {
   Modal,
   ActivityIndicator,
   Dimensions,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
@@ -106,7 +107,10 @@ export default function ItemDetailScreen() {
   const item = route.params?.item;
   const addons: AddonItem[] = (item?.addons ?? []).map(normalizeAddonFromItem);
   const [selectedAddonIds, setSelectedAddonIds] = useState<Set<string>>(new Set());
+  const [specialInstructions, setSpecialInstructions] = useState('');
+  const [instructionsInputHeight, setInstructionsInputHeight] = useState(44);
   const [addingToCart, setAddingToCart] = useState(false);
+  const [itemAdded, setItemAdded] = useState(false);
   const [showSkeleton, setShowSkeleton] = useState(true);
 
   const [addresses, setAddresses] = useState<Address[]>([]);
@@ -201,7 +205,12 @@ export default function ItemDetailScreen() {
       else next.add(id);
       return next;
     });
+    setItemAdded(false);
   };
+
+  useEffect(() => {
+    setItemAdded(false);
+  }, [item?.id]);
 
   const mainPrice = item?.price ? parseFloat(String(item.price).replace(/[$,]/g, '')) || 0 : 0;
   const addonsTotal = addons
@@ -309,6 +318,26 @@ export default function ItemDetailScreen() {
             ) : null}
           </View>
         ) : null}
+
+        <View style={styles.instructionsSection}>
+          <Text style={styles.instructionsTitle}>Special instructions</Text>
+          <TextInput
+            value={specialInstructions}
+            onChangeText={(v) => {
+              setSpecialInstructions(v);
+              setItemAdded(false);
+            }}
+            placeholder="Add notes for this item (optional)"
+            placeholderTextColor="rgba(255,255,255,0.45)"
+            multiline
+            textAlignVertical="top"
+            style={[styles.instructionsInput, { height: instructionsInputHeight }]}
+            onContentSizeChange={(e) => {
+              const h = Math.ceil(e.nativeEvent.contentSize.height) + 14;
+              setInstructionsInputHeight(Math.max(44, Math.min(180, h)));
+            }}
+          />
+        </View>
 
         {/* Choose add-ons */}
         <View style={styles.addonsSection}>
@@ -429,14 +458,19 @@ export default function ItemDetailScreen() {
               price: item.price,
               image: item.image,
               addons: selectedAddonsList,
+              instructions: specialInstructions.trim() || undefined,
               quantity: 1,
             });
             await new Promise((r) => setTimeout(r, 500));
+            setAddingToCart(false);
+            setItemAdded(true);
             navigation.navigate('Cart');
           }}
           disabled={addingToCart}
         >
-          <Text style={styles.addToCartBtnText}>{addingToCart ? 'Adding…' : 'Add To Cart'}</Text>
+          <Text style={styles.addToCartBtnText}>
+            {addingToCart ? 'Adding…' : itemAdded ? 'Added' : 'Add To Cart'}
+          </Text>
         </Pressable>
       </View>
     </SafeAreaView>
@@ -557,6 +591,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: HORIZONTAL_PADDING,
     paddingTop: 10,
     paddingBottom: 8,
+  },
+  instructionsSection: {
+    paddingHorizontal: HORIZONTAL_PADDING,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  instructionsTitle: {
+    fontFamily: 'Montserrat_700Bold',
+    fontSize: 15,
+    fontWeight: '700',
+    color: TEXT_WHITE,
+    marginBottom: 10,
+  },
+  instructionsInput: {
+    backgroundColor: SEARCH_BG,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: TEXT_WHITE,
+    lineHeight: 18,
   },
   deliveryBar: {
     flexDirection: 'row',

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -6,10 +6,14 @@ import {
   ScrollView,
   Pressable,
   Image,
+  Alert,
+  ActivityIndicator,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { submitReview } from '../../api/review';
 
 const BG = '#0B1D1B';
 const CARD = '#152C29';
@@ -79,13 +83,18 @@ const starStyles = StyleSheet.create({
 export default function RateYourFeastScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const { items, orderType } = (route.params || {}) as RouteParams;
+  const { orderId, items, orderType } = (route.params || {}) as RouteParams;
   const mode = useMemo(() => getReviewMode(orderType), [orderType]);
   const labels = useMemo(() => modeExperienceLabels(mode), [mode]);
   const tags = useMemo(() => modeTags(mode), [mode]);
 
   const [dishRating, setDishRating] = useState(0);
   const [tagSelected, setTagSelected] = useState<string | null>(null);
+  const [comment, setComment] = useState('');
+  const [commentInputHeight, setCommentInputHeight] = useState(92);
+  const [submitting, setSubmitting] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [experienceRatings, setExperienceRatings] = useState<Record<string, number>>({
     a: 0,
     b: 0,
@@ -98,7 +107,74 @@ export default function RateYourFeastScreen() {
     setDishRating(0);
   }, [mode]);
 
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
+
   const titleLine = items?.trim() || 'AI Pastor Tacos (3)';
+  const reviewOrderType = useMemo<'Delivery' | 'Pickup' | 'Dine In'>(() => {
+    if (mode === 'delivery') return 'Delivery';
+    if (mode === 'dining') return 'Dine In';
+    return 'Pickup';
+  }, [mode]);
+
+  const canSubmit = dishRating > 0 && experienceRatings.a > 0 && experienceRatings.b > 0 && experienceRatings.c > 0 && !!orderId?.trim();
+
+  const handleSubmit = async () => {
+    if (!orderId?.trim()) {
+      Alert.alert('Missing order', 'Order id is missing. Please open review from your order details.');
+      return;
+    }
+    if (!canSubmit) {
+      Alert.alert('Incomplete review', 'Please rate all required fields before submitting.');
+      return;
+    }
+
+    const experience =
+      mode === 'delivery'
+        ? {
+            foodQuality: experienceRatings.a,
+            deliverySpeed: experienceRatings.b,
+            packaging: experienceRatings.c,
+          }
+        : mode === 'dining'
+          ? {
+              foodQuality: experienceRatings.a,
+              staffService: experienceRatings.b,
+              ambience: experienceRatings.c,
+            }
+          : {
+              foodQuality: experienceRatings.a,
+              pickupSpeed: experienceRatings.b,
+              packaging: experienceRatings.c,
+            };
+
+    try {
+      setSubmitting(true);
+      const res = await submitReview({
+        orderId: String(orderId),
+        orderType: reviewOrderType,
+        dishRating,
+        dishTag: tagSelected ?? undefined,
+        comment: comment.trim() || undefined,
+        experience,
+      });
+      setToastMessage(res.message || 'Review posted successfully.');
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = setTimeout(() => {
+        navigation.goBack();
+      }, 1200);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to submit review.';
+      Alert.alert('Review failed', msg);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom', 'left', 'right']}>
@@ -174,6 +250,41 @@ export default function RateYourFeastScreen() {
               })}
             </View>
           </View>
+
+          <View style={styles.commentWrap}>
+            <Text style={styles.commentLabel}>Comment (optional)</Text>
+            <TextInput
+              value={comment}
+              onChangeText={setComment}
+              placeholder="Share your experience..."
+              placeholderTextColor="rgba(255,255,255,0.45)"
+              multiline
+              textAlignVertical="top"
+              style={[styles.commentInput, { height: commentInputHeight }]}
+              onContentSizeChange={(e) => {
+                const next = Math.max(92, Math.min(180, Math.ceil(e.nativeEvent.contentSize.height) + 20));
+                setCommentInputHeight(next);
+              }}
+            />
+          </View>
+
+          <Pressable
+            style={[styles.submitBtn, (!canSubmit || submitting) && styles.submitBtnDisabled]}
+            onPress={handleSubmit}
+            disabled={!canSubmit || submitting}
+          >
+            {submitting ? (
+              <ActivityIndicator size="small" color={BG} />
+            ) : (
+              <Text style={styles.submitBtnText}>Submit review</Text>
+            )}
+          </Pressable>
+
+          {toastMessage ? (
+            <View style={styles.toast}>
+              <Text style={styles.toastText}>{toastMessage}</Text>
+            </View>
+          ) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -305,5 +416,57 @@ const styles = StyleSheet.create({
   },
   tagTextActive: {
     color: BG,
+  },
+  commentWrap: {
+    marginTop: -2,
+    marginBottom: 12,
+  },
+  commentLabel: {
+    color: TEXT,
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  commentInput: {
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 12,
+    color: TEXT,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  submitBtn: {
+    marginTop: 4,
+    marginBottom: 8,
+    backgroundColor: GOLD,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+  },
+  submitBtnDisabled: {
+    opacity: 0.55,
+  },
+  submitBtnText: {
+    color: BG,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  toast: {
+    marginTop: 10,
+    backgroundColor: 'rgba(34,197,94,0.95)',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  toastText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
   },
 });

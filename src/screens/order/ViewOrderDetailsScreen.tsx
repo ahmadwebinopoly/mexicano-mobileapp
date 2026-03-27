@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 const WebView = require('react-native-webview').WebView;
 import { getNetworkErrorMessage } from '../../api/apiConfig';
 import { getVisit, type VisitLocation } from '../../api/content';
+import { getReviewByOrderId } from '../../api/review';
 import {
   getMyOrders,
   type MyOrdersResponse,
@@ -133,6 +134,18 @@ function formatOrderPlacedCompact(order: Order): string {
   return '—';
 }
 
+function getOrderNumberDisplay(order: Order): string {
+  const o = order as Order & {
+    orderId?: string | number;
+    order_id?: string | number;
+    _id?: string | number;
+  };
+  const raw = o.orderId ?? o.order_id ?? o.id ?? o._id;
+  const value = raw != null ? String(raw).trim() : '';
+  if (!value) return '—';
+  return value.startsWith('#') ? value : `#${value}`;
+}
+
 function formatRestaurantAddress(loc: VisitLocation | null): string {
   if (!loc) return '—';
   const line2 = [loc.city, loc.state, loc.zip].filter((x) => x && String(x).trim()).join(', ');
@@ -143,6 +156,15 @@ function formatRestaurantAddress(loc: VisitLocation | null): string {
 function isDeliveryOrder(order: Order): boolean {
   const t = (order.type || '').trim();
   return t === 'Delivery' || t.toLowerCase() === 'delivery';
+}
+
+function getServiceModeBadge(order: Order | null, delivery: boolean): string {
+  if (!order) return delivery ? 'DELIVERY' : 'PICKUP';
+  const t = String(order.type ?? '').trim().toLowerCase();
+  if (t === 'delivery') return 'DELIVERY';
+  if (t === 'dine in' || t === 'dining') return 'DINING';
+  if (t === 'pickup' || t === 'takeaway' || t === 'take away') return 'PICKUP';
+  return delivery ? 'DELIVERY' : 'PICKUP';
 }
 
 /** Same line as Checkout / AddressScreen: street + city + state + zip */
@@ -308,6 +330,8 @@ export default function ViewOrderDetailsScreen() {
   const [restaurantLocation, setRestaurantLocation] = useState<VisitLocation | null>(null);
   /** Default saved address (My Addresses) — enriches delivery map/text when order snapshot is missing; same API as AddressScreen */
   const [savedDefaultAddress, setSavedDefaultAddress] = useState<Address | null>(null);
+  const [reviewAlreadyExists, setReviewAlreadyExists] = useState(false);
+  const [checkingExistingReview, setCheckingExistingReview] = useState(false);
 
   const statusColor = useMemo(() => getStatusColor(order?.status), [order?.status]);
   const delivery = order ? isDeliveryOrder(order) : true;
@@ -463,6 +487,38 @@ export default function ViewOrderDetailsScreen() {
     }, [findOrderInResponse])
   );
 
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      if (!order?.id || !delivered) {
+        setReviewAlreadyExists(false);
+        setCheckingExistingReview(false);
+        return () => {
+          active = false;
+        };
+      }
+
+      setCheckingExistingReview(true);
+      void (async () => {
+        try {
+          const review = await getReviewByOrderId(String(order.id));
+          if (!active) return;
+          setReviewAlreadyExists(Boolean(review));
+        } catch {
+          if (!active) return;
+          // If this check fails, keep the button visible instead of blocking user action.
+          setReviewAlreadyExists(false);
+        } finally {
+          if (active) setCheckingExistingReview(false);
+        }
+      })();
+
+      return () => {
+        active = false;
+      };
+    }, [order?.id, delivered])
+  );
+
   const openMapExternal = useCallback(() => {
     const url = mapEmbedUrl.replace(/&output=embed/, '');
     Linking.openURL(url).catch(() => {});
@@ -539,12 +595,10 @@ export default function ViewOrderDetailsScreen() {
           </View>
         ) : null}
 
-        {/* Compact: placed time */}
-        <View style={styles.compactTimeCard}>
-          <Text style={styles.placedLine}>
-            <Text style={styles.placedLabel}>Placed </Text>
-            <Text style={styles.placedValue}>{formatOrderPlacedCompact(order)}</Text>
-          </Text>
+        {/* Hero: order id + created date (sample design) */}
+        <View style={styles.orderHeroMeta}>
+          <Text style={styles.orderHeroId}>ORDER {getOrderNumberDisplay(order)}</Text>
+          <Text style={styles.orderHeroDate}>{formatOrderDateTime(order)}</Text>
         </View>
 
         {/* Order summary — directly under placed time */}
@@ -600,7 +654,7 @@ export default function ViewOrderDetailsScreen() {
           </View>
           <StatusProgressLine steps={progressSteps} activeIndex={progressActiveIndex} />
         </View>
-        {delivered ? (
+        {delivered && !reviewAlreadyExists && !checkingExistingReview ? (
           <View style={styles.addReviewWrap}>
             <Pressable
               style={styles.addReviewBtn}
@@ -653,7 +707,7 @@ export default function ViewOrderDetailsScreen() {
             <Text style={styles.mapTitle}>{delivery ? 'Map' : 'Restaurant map'}</Text>
             <View style={styles.liveBadge}>
               <Ionicons name="navigate-outline" size={12} color={GOLD} />
-              <Text style={styles.liveBadgeText}>{delivery ? 'Delivery' : 'Pickup'}</Text>
+              <Text style={styles.liveBadgeText}>{getServiceModeBadge(order, delivery)}</Text>
             </View>
           </View>
           <View style={styles.mapContainer}>
@@ -740,27 +794,26 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     flex: 1,
   },
-  compactTimeCard: {
+  orderHeroMeta: {
     marginHorizontal: HORIZONTAL_PADDING,
-    marginBottom: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: CARD_BG,
-    borderWidth: 1,
-    borderColor: 'rgba(254,185,72,0.15)',
+    marginBottom: 14,
+    marginTop: 2,
   },
-  placedLine: {
-    fontSize: 12,
-    lineHeight: 16,
+  orderHeroId: {
+    fontSize: 30,
+    lineHeight: 34,
+    fontWeight: '900',
+    color: GOLD,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
   },
-  placedLabel: {
-    color: MUTED_TEXT,
-    fontWeight: '600',
-  },
-  placedValue: {
+  orderHeroDate: {
+    marginTop: 10,
+    fontSize: 15,
+    lineHeight: 22,
     color: TEXT_WHITE,
-    fontWeight: '700',
+    opacity: 0.88,
+    fontWeight: '500',
   },
   cardCompact: {
     marginHorizontal: HORIZONTAL_PADDING,

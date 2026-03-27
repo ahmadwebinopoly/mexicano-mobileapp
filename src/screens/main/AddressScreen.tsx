@@ -241,7 +241,9 @@ export default function AddressScreen() {
           place.postalCode,
           place.country,
         ].filter(Boolean);
-        setFetchedAddressText(parts.join(', '));
+        const resolvedAddress = parts.join(', ');
+        setFetchedAddressText(resolvedAddress);
+        if (resolvedAddress) setAddAddress(resolvedAddress);
         if (place.city) setAddCity(place.city);
         if (place.region) setAddState(place.region);
         if (place.postalCode) setAddZipCode(place.postalCode);
@@ -517,6 +519,30 @@ export default function AddressScreen() {
                   <Text style={styles.tapToOpenMaps}>Tap to open in Google Maps</Text>
                 </Pressable>
               )}
+
+              {/* Label */}
+              <Text style={styles.inputLabel}>Label</Text>
+              <View style={styles.labelPickerRow}>
+                {(['Home', 'Office', 'Other'] as const).map((label) => {
+                  const active = addLabel.trim().toLowerCase() === label.toLowerCase();
+                  return (
+                    <Pressable
+                      key={label}
+                      onPress={() => setAddLabel(label)}
+                      style={[styles.labelChip, active && styles.labelChipActive]}
+                    >
+                      <Ionicons
+                        name={label === 'Office' ? 'business-outline' : label === 'Other' ? 'location-outline' : 'home-outline'}
+                        size={16}
+                        color={active ? BG_DARK : GOLD}
+                      />
+                      <Text style={[styles.labelChipText, active && styles.labelChipTextActive]}>
+                        {label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
 
               {/* Full Address */}
               <Text style={styles.inputLabel}>Full Address *</Text>
@@ -1019,6 +1045,35 @@ const styles = StyleSheet.create({
     marginTop: 12,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+  },
+  labelPickerRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 8,
+  },
+  labelChip: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(254,203,77,0.22)',
+  },
+  labelChipActive: {
+    backgroundColor: GOLD,
+    borderColor: GOLD,
+  },
+  labelChipText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: TEXT_WHITE,
+  },
+  labelChipTextActive: {
+    color: BG_DARK,
   },
   input: {
     backgroundColor: 'rgba(255,255,255,0.08)',

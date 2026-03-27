@@ -33,6 +33,9 @@ export interface PlaceOrderPayload {
   type: 'Delivery' | 'Pickup' | 'Dine In';
   amount: string;
   address: string;
+  /** Optional delivery coordinates (for Delivery orders). */
+  latitude?: number;
+  longitude?: number;
   phone: string;
   notes?: string;
   /** Optional promo / discount code (camelCase + snake_case sent in body). */
@@ -62,6 +65,8 @@ export async function placeOrder(payload: PlaceOrderPayload): Promise<PlaceOrder
   // Build body explicitly: some stacks only persist snake_case; others read camelCase.
   // Do not send payment_id as "" — backends often treat empty id as "no card payment" and show COD.
   const {
+    latitude,
+    longitude,
     paymentMethod,
     paymentStatus,
     paymentId,
@@ -70,6 +75,20 @@ export async function placeOrder(payload: PlaceOrderPayload): Promise<PlaceOrder
   } = payload;
 
   const body: Record<string, unknown> = { ...rest };
+
+  // Coordinates (support common key variants)
+  if (typeof latitude === 'number' && Number.isFinite(latitude)) {
+    body.latitude = latitude;
+    body.lat = latitude;
+    body.deliveryLatitude = latitude;
+    body.delivery_latitude = latitude;
+  }
+  if (typeof longitude === 'number' && Number.isFinite(longitude)) {
+    body.longitude = longitude;
+    body.lng = longitude;
+    body.deliveryLongitude = longitude;
+    body.delivery_longitude = longitude;
+  }
 
   const codeTrim = discountCode != null ? String(discountCode).trim() : '';
   if (codeTrim) {

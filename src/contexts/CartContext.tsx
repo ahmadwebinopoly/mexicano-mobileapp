@@ -15,6 +15,8 @@ export type CartItem = {
   image: { uri: string } | null;
   quantity: number;
   addons: CartAddon[];
+  /** Optional per-item special instructions (future backend support). */
+  instructions?: string;
 };
 
 type CartContextValue = {
@@ -62,11 +64,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     (item: Omit<CartItem, 'id' | 'quantity'> & { quantity?: number }) => {
       const quantity = item.quantity ?? 1;
       const addons = Array.isArray(item.addons) ? item.addons : [];
+      const nextInstructions = String(item.instructions ?? '').trim();
       setItems((prev) => {
         const nextAddonsSig = getAddonsSignature(addons);
         const existingIndex = prev.findIndex((p) => {
           if (String(p.productId) !== String(item.productId)) return false;
-          return getAddonsSignature(Array.isArray(p.addons) ? p.addons : []) === nextAddonsSig;
+          if (getAddonsSignature(Array.isArray(p.addons) ? p.addons : []) !== nextAddonsSig) return false;
+          const prevInstructions = String(p.instructions ?? '').trim();
+          return prevInstructions === nextInstructions;
         });
 
         if (existingIndex === -1) {

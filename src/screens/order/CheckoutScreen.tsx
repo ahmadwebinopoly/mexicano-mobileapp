@@ -27,6 +27,7 @@ import { useCart, type CartItem } from '../../contexts/CartContext';
 import { getCurrentUser } from '../../api/profile';
 import { getAddress } from '../../api/saveadresss';
 import { createPaymentIntent, getStripeConfig, verifyStripePaymentSuccess } from '../../api/stripe';
+import { getOrderModes } from '../../api/orderModes';
 import { CheckoutScreenSkeleton } from '../../components/skeleton';
 import { navigateToLoginRegister } from '../../navigation/rootNavigationRef';
 
@@ -63,6 +64,12 @@ function parsePrice(p: string): number {
   return parseFloat(String(p).replace(/[$,]/g, '')) || 0;
 }
 
+function parsePositiveNumber(value: unknown): number | null {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
+}
+
 function getLineTotal(item: CartItem): number {
   const addonsList = Array.isArray(item.addons) ? item.addons : [];
   const main = parsePrice(item.price) * item.quantity;
@@ -82,7 +89,10 @@ function formatItemsForOrder(items: CartItem[]): string {
     .map((item) => {
       const addons = getAddonsSubtitle(item);
       const base = item.name + (addons ? ` (${addons})` : '');
-      return `${base} x${item.quantity}`;
+      const instruction = String(item.instructions ?? '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      return `${base} x${item.quantity}${instruction ? ` [Instruction: ${instruction}]` : ''}`;
     })
     .join(', ');
 }
@@ -151,6 +161,10 @@ export default function CheckoutScreen() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const toastOpacity = useRef(new Animated.Value(0)).current;
   const [orderMode, setOrderMode] = useState<OrderMode>(null);
+  const [deliveryFee, setDeliveryFee] = useState(0);
+  const [instructionModalVisible, setInstructionModalVisible] = useState(false);
+  const [activeInstructionText, setActiveInstructionText] = useState('');
+  const [activeInstructionItemName, setActiveInstructionItemName] = useState('');
   /** Extra bottom padding while keyboard is open so Stripe CardField + inputs scroll above the keyboard. */
   const [keyboardBottomInset, setKeyboardBottomInset] = useState(0);
 
@@ -191,6 +205,34 @@ export default function CheckoutScreen() {
   );
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const modesRaw = (await getOrderModes()) as unknown as Record<string, unknown>;
+        if (cancelled) return;
+        const deliveryObj =
+          modesRaw && typeof modesRaw.delivery === 'object'
+            ? (modesRaw.delivery as Record<string, unknown>)
+            : null;
+        const fee = parsePositiveNumber(
+          deliveryObj?.fee ??
+            deliveryObj?.deliveryFee ??
+            deliveryObj?.delivery_fee ??
+            modesRaw.fee ??
+            modesRaw.deliveryFee ??
+            modesRaw.delivery_fee
+        );
+        setDeliveryFee(fee ?? 0);
+      } catch {
+        if (!cancelled) setDeliveryFee(0);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!toast) return;
     toastOpacity.setValue(0);
     Animated.sequence([
@@ -228,6 +270,14 @@ export default function CheckoutScreen() {
     if (!discountPreviewValid || !discountPreview) return cartSubtotal;
     return Math.max(0, discountPreview.finalAmount);
   }, [discountPreviewValid, discountPreview, cartSubtotal]);
+
+  const effectiveDeliveryFee = useMemo(() => {
+    return orderMode === 'delivery' ? deliveryFee : 0;
+  }, [orderMode, deliveryFee]);
+
+  const payableTotal = useMemo(() => {
+    return Math.max(0, orderToCharge + effectiveDeliveryFee);
+  }, [orderToCharge, effectiveDeliveryFee]);
 
   useEffect(() => {
     if (!discountPreview) return;
@@ -278,6 +328,14 @@ export default function CheckoutScreen() {
       setDiscountApplying(false);
     }
   };
+
+  const openInstructionModal = React.useCallback((itemName: string, instructions: string) => {
+    const text = String(instructions ?? '').trim();
+    if (!text) return;
+    setActiveInstructionItemName(itemName);
+    setActiveInstructionText(text);
+    setInstructionModalVisible(true);
+  }, []);
 
   const ensureStripeIsReady = async () => {
     if (stripeReady) return;
@@ -346,9 +404,19 @@ export default function CheckoutScreen() {
       const requiresAddress = mode === 'delivery';
 
       let addressStr = '';
+      let addressLat: number | undefined;
+      let addressLng: number | undefined;
       if (requiresAddress) {
         const address = await getAddress();
         addressStr = formatAddress(address);
+        addressLat =
+          address && typeof (address as any).latitude === 'number' && Number.isFinite((address as any).latitude)
+            ? (address as any).latitude
+            : undefined;
+        addressLng =
+          address && typeof (address as any).longitude === 'number' && Number.isFinite((address as any).longitude)
+            ? (address as any).longitude
+            : undefined;
         if (!addressStr.trim()) {
           Alert.alert(
             'Address required',
@@ -363,7 +431,7 @@ export default function CheckoutScreen() {
 
       if (payModeSelected === 'stripe') {
         await ensureStripeIsReady();
-        const amount = Number(orderToCharge.toFixed(2));
+        const amount = Number(payableTotal.toFixed(2));
         if (Number.isNaN(amount) || amount < 0.5) {
           throw new Error('Minimum card payment amount is 0.50.');
         }
@@ -417,8 +485,10 @@ export default function CheckoutScreen() {
         customer,
         items: formatItemsForOrder(items),
         type: orderTypePayload,
-        amount: formatPrice(orderToCharge.toFixed(2)),
+        amount: formatPrice(payableTotal.toFixed(2)),
         address: addressPayload,
+        latitude: requiresAddress ? addressLat : undefined,
+        longitude: requiresAddress ? addressLng : undefined,
         phone: user?.phone?.trim() || '',
         notes: notes.trim() || undefined,
         discountCode: discountPreviewValid ? discountCode.trim() : undefined,
@@ -522,9 +592,26 @@ export default function CheckoutScreen() {
                     )}
                   </View>
                   <View style={styles.cartRowBody}>
-                    <Text style={styles.cartRowName} numberOfLines={2}>
-                      {cartItem.name}
-                    </Text>
+                    <View style={styles.cartRowTitleRow}>
+                      <Text style={styles.cartRowName} numberOfLines={2}>
+                        {cartItem.name}
+                      </Text>
+                      {String(cartItem.instructions ?? '').trim() ? (
+                        <Pressable
+                          style={styles.itemInstructionBtn}
+                          onPress={() =>
+                            openInstructionModal(
+                              cartItem.name,
+                              String(cartItem.instructions ?? '')
+                            )
+                          }
+                          hitSlop={6}
+                          accessibilityLabel={`View instructions for ${cartItem.name}`}
+                        >
+                          <Ionicons name="document-text-outline" size={16} color={GOLD} />
+                        </Pressable>
+                      ) : null}
+                    </View>
                     {Array.isArray(cartItem.addons) && cartItem.addons.length > 0 ? (
                       <View style={styles.cartAddonList}>
                         {cartItem.addons.map((addon) => (
@@ -620,8 +707,8 @@ export default function CheckoutScreen() {
           {discountPreviewValid && discountPreview ? (
             <Text style={styles.discountAppliedHint}>
               {discountPreview.discountAmount > 0
-                ? `You save ${formatPrice(discountPreview.discountAmount.toFixed(2))} — new total ${formatPrice(orderToCharge.toFixed(2))}.`
-                : `New total ${formatPrice(orderToCharge.toFixed(2))}.`}
+                ? `You save ${formatPrice(discountPreview.discountAmount.toFixed(2))} — new total ${formatPrice(payableTotal.toFixed(2))}.`
+                : `New total ${formatPrice(payableTotal.toFixed(2))}.`}
             </Text>
           ) : null}
         </View>
@@ -722,10 +809,16 @@ export default function CheckoutScreen() {
                   </Text>
                 </View>
               ) : null}
+              {effectiveDeliveryFee > 0 ? (
+                <View style={styles.totalBillRow}>
+                  <Text style={styles.totalBillRowLabel}>Delivery charges</Text>
+                  <Text style={styles.totalBillRowAmount}>{formatPrice(effectiveDeliveryFee.toFixed(2))}</Text>
+                </View>
+              ) : null}
               <View style={styles.totalBillDivider} />
               <View style={styles.totalBillRowGrand}>
                 <Text style={styles.totalBillGrandLabel}>Total</Text>
-                <Text style={styles.totalBillGrandAmount}>{formatPrice(orderToCharge.toFixed(2))}</Text>
+                <Text style={styles.totalBillGrandAmount}>{formatPrice(payableTotal.toFixed(2))}</Text>
               </View>
             </View>
           </View>
@@ -740,7 +833,7 @@ export default function CheckoutScreen() {
       <View style={styles.bottomBar}>
         <View style={styles.totalWrap}>
           <Text style={styles.totalLabel}>Total</Text>
-          <Text style={styles.totalPrice}>{formatPrice(orderToCharge.toFixed(2))}</Text>
+          <Text style={styles.totalPrice}>{formatPrice(payableTotal.toFixed(2))}</Text>
         </View>
         <Pressable
           style={[
@@ -811,6 +904,39 @@ export default function CheckoutScreen() {
           </SafeAreaView>
         </Modal>
       )}
+
+      <Modal
+        visible={instructionModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setInstructionModalVisible(false)}
+      >
+        <SafeAreaView style={styles.instructionBackdrop} edges={['top', 'bottom', 'left', 'right']}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setInstructionModalVisible(false)}
+          />
+          <Pressable
+            style={styles.instructionCard}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={styles.instructionHeader}>
+              <Text style={styles.instructionTitle}>Special Instructions</Text>
+              <Pressable
+                style={styles.instructionCloseBtn}
+                onPress={() => setInstructionModalVisible(false)}
+                hitSlop={8}
+              >
+                <Ionicons name="close" size={18} color={TEXT_WHITE} />
+              </Pressable>
+            </View>
+            <Text style={styles.instructionItemName} numberOfLines={1}>
+              {activeInstructionItemName}
+            </Text>
+            <Text style={styles.instructionBody}>{activeInstructionText}</Text>
+          </Pressable>
+        </SafeAreaView>
+      </Modal>
 
       {toast ? (
         <Animated.View
@@ -916,6 +1042,53 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: BG_DARK,
+  },
+  instructionBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(11,29,27,0.8)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  instructionCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: CARD_BG,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(254,203,77,0.22)',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+  },
+  instructionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  instructionTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: TEXT_WHITE,
+  },
+  instructionCloseBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  instructionItemName: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: GOLD,
+    marginBottom: 8,
+  },
+  instructionBody: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: TEXT_WHITE,
   },
   loginRequiredBtnPressed: {
     opacity: 0.85,
@@ -1071,11 +1244,29 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 12,
   },
+  cartRowTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
   cartRowName: {
     fontSize: 15,
     fontWeight: '600',
     color: TEXT_WHITE,
     marginBottom: 4,
+    flex: 1,
+    minWidth: 0,
+  },
+  itemInstructionBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(254,203,77,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(254,203,77,0.3)',
   },
   cartAddonList: {
     gap: 6,

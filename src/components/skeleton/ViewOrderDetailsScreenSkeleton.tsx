@@ -22,12 +22,10 @@ export function ViewOrderDetailsScreenSkeleton() {
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <Pressable style={styles.backBtn} onPress={() => navigation.goBack()} hitSlop={8}>
-            <Ionicons name="arrow-back" size={18} color={TEXT_WHITE} />
+            <Ionicons name="arrow-back" size={20} color={BG_DARK} />
           </Pressable>
           <SkeletonBox width={130} height={18} borderRadius={6} style={styles.headerTitleSkeleton} />
-          <View style={styles.headerIconBtn}>
-            <Ionicons name="help-circle-outline" size={20} color={TEXT_WHITE} />
-          </View>
+          <View style={styles.headerRightSpacer} />
         </View>
 
         {/* Placed time — compactTimeCard */}
@@ -87,6 +85,11 @@ export function ViewOrderDetailsScreenSkeleton() {
           </View>
         </View>
 
+        {/* Rate Your Feast button placeholder */}
+        <View style={styles.addReviewWrap}>
+          <SkeletonBox width="100%" height={44} borderRadius={12} />
+        </View>
+
         {/* Location */}
         <View style={styles.cardCompact}>
           <View style={styles.sectionTitleRow}>
@@ -121,6 +124,13 @@ export function ViewOrderDetailsScreenSkeleton() {
           </View>
         </View>
 
+        {/* Notes card placeholder */}
+        <View style={styles.cardCompact}>
+          <SkeletonBox width={52} height={12} borderRadius={6} style={{ marginBottom: 8 }} />
+          <SkeletonBox width="94%" height={14} borderRadius={6} style={{ marginBottom: 6 }} />
+          <SkeletonBox width="72%" height={14} borderRadius={6} />
+        </View>
+
         <View style={styles.bottomSpacer} />
       </ScrollView>
     </SafeAreaView>
@@ -145,19 +155,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#FECB4D',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerIconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
+  headerRightSpacer: {
+    width: 32,
+    height: 32,
   },
   headerTitleSkeleton: {
     flex: 1,
@@ -189,6 +196,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 6,
+  },
+  addReviewWrap: {
+    marginHorizontal: HORIZONTAL_PADDING,
+    marginTop: 2,
+    marginBottom: 10,
   },
   summaryHeroRow: {
     flexDirection: 'row',

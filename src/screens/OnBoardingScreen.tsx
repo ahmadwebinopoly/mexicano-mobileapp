@@ -109,7 +109,7 @@ type ServiceOption = 'delivery' | 'takeaway' | 'dining' | null;
 
 const SERVICE_OPTIONS: { key: ServiceOption; icon: React.ComponentProps<typeof MaterialIcons>['name']; title: string; description: string }[] = [
   { key: 'delivery', icon: 'delivery-dining', title: 'Delivery', description: 'The Mexicano will bring your order to your door' },
-  { key: 'takeaway', icon: 'takeout-dining', title: 'Take away', description: 'We will pack your order and you can pick it up soon' },
+  { key: 'takeaway', icon: 'takeout-dining', title: 'Pick up', description: 'We will pack your order and you can pick it up soon' },
   { key: 'dining', icon: 'restaurant', title: 'Dining in place', description: 'Get your order started now and enjoy it as soon as you arrive' },
 ];
 
