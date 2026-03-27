@@ -6,7 +6,6 @@ import {
   ScrollView,
   Pressable,
   Linking,
-  Image,
   Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,7 +13,7 @@ import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/nativ
 import { Ionicons } from '@expo/vector-icons';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const WebView = require('react-native-webview').WebView;
-import { getApiBaseUrl, getNetworkErrorMessage } from '../../api/apiConfig';
+import { getNetworkErrorMessage } from '../../api/apiConfig';
 import { getVisit, type VisitLocation } from '../../api/content';
 import {
   getMyOrders,
@@ -24,13 +23,6 @@ import {
   type Order,
 } from '../../api/myorder';
 import { getAddress, type Address } from '../../api/saveadresss';
-import {
-  getCachedMenuItems,
-  getMenuItemImageUrlString,
-  getMenuItems,
-  parseMenuItemsFromApiJson,
-  type MenuItem,
-} from '../../api/Menu';
 import { ViewOrderDetailsScreenSkeleton } from '../../components/skeleton';
 
 const BG_DARK = '#0B1D1B';
@@ -143,47 +135,6 @@ function formatOrderPlacedCompact(order: Order): string {
   return '—';
 }
 
-function asNonEmptyString(v: unknown): string | null {
-  if (typeof v === 'string' && v.trim()) return v.trim();
-  return null;
-}
-
-function imageFromObject(v: unknown): string | null {
-  if (!v || typeof v !== 'object') return null;
-  const obj = v as Record<string, unknown>;
-  return asNonEmptyString(obj.url) || asNonEmptyString(obj.uri) || asNonEmptyString(obj.path);
-}
-
-function normalizeImageUri(raw: string, apiBase: string): string {
-  const s = raw.trim();
-  if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('file://')) return s;
-  if (s.startsWith('//')) return `https:${s}`;
-  const base = apiBase.replace(/\/+$/, '');
-  if (s.startsWith('/')) return `${base}${s}`;
-  return `${base}/${s.replace(/^\/+/, '')}`;
-}
-
-function resolveOrderImageUri(order: Order): string | null {
-  const apiBase = getApiBaseUrl();
-  const o = order as unknown as Record<string, unknown>;
-  const candidates: unknown[] = [
-    o.image,
-    o.imageUrl,
-    o.itemImage,
-    o.productImage,
-    o.thumbnail,
-    o.thumbnailUrl,
-    o.menuItemImage,
-    o.item_image,
-    o.product_image,
-  ];
-  for (const c of candidates) {
-    const str = asNonEmptyString(c) || imageFromObject(c);
-    if (str) return normalizeImageUri(str, apiBase);
-  }
-  return null;
-}
-
 function formatRestaurantAddress(loc: VisitLocation | null): string {
   if (!loc) return '—';
   const line2 = [loc.city, loc.state, loc.zip].filter((x) => x && String(x).trim()).join(', ');
@@ -212,53 +163,6 @@ const FIVE_STATUS_STEPS: { key: string; label: string }[] = [
 ];
 
 const CANCELLED_STEP: { key: string; label: string } = { key: 'cancelled', label: 'Cancelled' };
-
-/** Segments like "Burrito (extras) x2" — split on `, ` like checkout join. */
-function parseOrderItemSegments(items: string): string[] {
-  if (!items?.trim()) return [];
-  return items
-    .split(/,\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((s) => s.replace(/\s*x\d+\s*$/i, '').trim())
-    .filter(Boolean);
-}
-
-/** Compare order line text to menu names (spacing / punctuation tolerant). */
-function normalizeMatchKey(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-    .replace(/\s+/g, ' ');
-}
-
-/** Match order lines to GET /api/menu/items — uses same image fields as MenuScreen after Menu.ts coalesce fix. */
-function resolveImageFromMenuItems(orderItemsText: string, menu: MenuItem[]): string | null {
-  const apiBase = getApiBaseUrl();
-  if (!menu.length) return null;
-  const segments = parseOrderItemSegments(orderItemsText);
-  const lineCandidates: string[] = [];
-  for (const seg of segments) {
-    lineCandidates.push(seg.split('(')[0].trim(), seg.trim());
-  }
-  for (const line of lineCandidates) {
-    const key = normalizeMatchKey(line);
-    if (!key) continue;
-    for (const m of menu) {
-      const nameKey = normalizeMatchKey(m.name || '');
-      if (!nameKey) continue;
-      const exact = key === nameKey;
-      const contains = key.includes(nameKey) || nameKey.includes(key);
-      const prefix = key.startsWith(nameKey) || nameKey.startsWith(key);
-      if (exact || contains || prefix) {
-        const raw = getMenuItemImageUrlString(m);
-        if (raw) return normalizeImageUri(raw, apiBase);
-      }
-    }
-  }
-  return null;
-}
 
 function splitItemsSummary(items: string): string[] {
   if (!items || !items.trim()) return [];
@@ -403,23 +307,9 @@ export default function ViewOrderDetailsScreen() {
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [orderImageFailed, setOrderImageFailed] = useState(false);
-  const [menuResolvedImageUri, setMenuResolvedImageUri] = useState<string | null>(null);
   const [restaurantLocation, setRestaurantLocation] = useState<VisitLocation | null>(null);
   /** Default saved address (My Addresses) — enriches delivery map/text when order snapshot is missing; same API as AddressScreen */
   const [savedDefaultAddress, setSavedDefaultAddress] = useState<Address | null>(null);
-
-  const displayImageUri = useMemo(() => {
-    if (menuResolvedImageUri) return menuResolvedImageUri;
-    if (order?.items?.trim()) {
-      const cached = getCachedMenuItems();
-      if (cached?.length) {
-        const fromCache = resolveImageFromMenuItems(order.items, cached);
-        if (fromCache) return fromCache;
-      }
-    }
-    return order ? resolveOrderImageUri(order) : null;
-  }, [order, menuResolvedImageUri]);
 
   const statusColor = useMemo(() => getStatusColor(order?.status), [order?.status]);
   const delivery = order ? isDeliveryOrder(order) : true;
@@ -468,46 +358,6 @@ export default function ViewOrderDetailsScreen() {
   }, [order, delivery, restaurantLocation, savedDefaultAddress]);
 
   const mapHtml = useMemo(() => buildMapHtml(mapEmbedUrl), [mapEmbedUrl]);
-
-  useEffect(() => {
-    setOrderImageFailed(false);
-  }, [order?.id, displayImageUri]);
-
-  useEffect(() => {
-    if (!order?.items?.trim()) {
-      setMenuResolvedImageUri(null);
-      return;
-    }
-    let aborted = false;
-    void (async () => {
-      try {
-        const base = getApiBaseUrl();
-        let menu: MenuItem[] = [];
-        try {
-          menu = await getMenuItems();
-        } catch {
-          const res = await fetch(`${base.replace(/\/+$/, '')}/api/menu/items`);
-          const text = await res.text();
-          if (!res.ok) throw new Error(text || String(res.status));
-          let json: unknown = null;
-          try {
-            json = text ? JSON.parse(text) : null;
-          } catch {
-            json = null;
-          }
-          menu = parseMenuItemsFromApiJson(json);
-        }
-        if (aborted) return;
-        const uri = resolveImageFromMenuItems(order.items, menu);
-        setMenuResolvedImageUri(uri);
-      } catch {
-        if (!aborted) setMenuResolvedImageUri(null);
-      }
-    })();
-    return () => {
-      aborted = true;
-    };
-  }, [order?.id, order?.items]);
 
   useEffect(() => {
     let mounted = true;
@@ -673,9 +523,7 @@ export default function ViewOrderDetailsScreen() {
             <Ionicons name="arrow-back" size={18} color={TEXT_WHITE} />
           </Pressable>
           <Text style={styles.headerTitle}>Order status</Text>
-          <Pressable style={styles.headerIconBtn} hitSlop={8} accessibilityLabel="Help">
-            <Ionicons name="help-circle-outline" size={20} color={TEXT_WHITE} />
-          </Pressable>
+          <View style={styles.headerRightSpacer} />
         </View>
 
         {cancelled ? (
@@ -697,21 +545,6 @@ export default function ViewOrderDetailsScreen() {
         <View style={styles.cardCompact}>
           <Text style={styles.sectionTitle}>Order summary</Text>
           <View style={styles.summaryHeroRow}>
-            <View style={styles.orderImageWrap}>
-              {displayImageUri && !orderImageFailed ? (
-                <Image
-                  key={displayImageUri}
-                  source={{ uri: displayImageUri }}
-                  style={styles.orderImage}
-                  resizeMode="cover"
-                  onError={() => setOrderImageFailed(true)}
-                />
-              ) : (
-                <View style={styles.orderImagePlaceholder}>
-                  <Ionicons name="fast-food-outline" size={22} color={GOLD} />
-                </View>
-              )}
-            </View>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.orderItemTitle} numberOfLines={3}>
                 {order.items || 'Your order'}
@@ -854,12 +687,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerIconBtn: {
+  headerRightSpacer: {
     width: 40,
     height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   headerTitle: {
     flex: 1,
@@ -1047,23 +877,6 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 12,
     marginTop: 8,
-  },
-  orderImageWrap: {
-    width: 72,
-    height: 72,
-    borderRadius: 14,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  orderImage: {
-    width: '100%',
-    height: '100%',
-  },
-  orderImagePlaceholder: {
-    width: '100%',
-    height: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   orderItemTitle: {
     fontSize: 14,

@@ -40,8 +40,17 @@ export default function AddressScreen() {
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [addErrors, setAddErrors] = useState<{ location?: string; fullAddress?: string }>({});
-  const [editErrors, setEditErrors] = useState<{ fullAddress?: string }>({});
+  const [addErrors, setAddErrors] = useState<{
+    location?: string;
+    fullAddress?: string;
+    city?: string;
+    state?: string;
+  }>({});
+  const [editErrors, setEditErrors] = useState<{
+    fullAddress?: string;
+    city?: string;
+    state?: string;
+  }>({});
 
   // Edit modal state
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -151,8 +160,13 @@ export default function AddressScreen() {
   const handleSaveEdit = async () => {
     if (!editingAddress) return;
 
-    if (!editAddress.trim()) {
-      setEditErrors({ fullAddress: 'Full address is required.' });
+    const nextErrors: { fullAddress?: string; city?: string; state?: string } = {};
+    if (!editAddress.trim()) nextErrors.fullAddress = 'Full address is required.';
+    if (!editCity.trim()) nextErrors.city = 'City is required.';
+    if (!editState.trim()) nextErrors.state = 'State is required.';
+
+    if (Object.values(nextErrors).some(Boolean)) {
+      setEditErrors(nextErrors);
       return;
     }
 
@@ -240,15 +254,28 @@ export default function AddressScreen() {
   };
 
   const handleSaveNewAddress = async () => {
-    const hasLocation = addLatitude != null && addLongitude != null;
-    const addressOk = !!addAddress.trim();
-    // Show only the first missing field to keep UX clean.
-    if (!hasLocation) {
-      setAddErrors({ location: 'Please fetch your location first.', fullAddress: undefined });
-      return;
+    const nextErrors: {
+      location?: string;
+      fullAddress?: string;
+      city?: string;
+      state?: string;
+    } = {};
+
+    if (addLatitude == null || addLongitude == null) {
+      nextErrors.location = 'Please fetch your location first.';
     }
-    if (!addressOk) {
-      setAddErrors({ fullAddress: 'Full address is required.', location: undefined });
+    if (!addAddress.trim()) {
+      nextErrors.fullAddress = 'Full address is required.';
+    }
+    if (!addCity.trim()) {
+      nextErrors.city = 'City is required.';
+    }
+    if (!addState.trim()) {
+      nextErrors.state = 'State is required.';
+    }
+
+    if (Object.values(nextErrors).some(Boolean)) {
+      setAddErrors(nextErrors);
       return;
     }
 
@@ -404,11 +431,11 @@ export default function AddressScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={22} color={BG_DARK} />
+          <Ionicons name="arrow-back" size={20} color={BG_DARK} />
         </Pressable>
         <Text style={styles.headerTitle}>My Addresses</Text>
         <Pressable style={styles.addButton} onPress={openAddModal}>
-          <Ionicons name="add" size={24} color={BG_DARK} />
+          <Ionicons name="add" size={20} color={BG_DARK} />
         </Pressable>
       </View>
 
@@ -491,16 +518,6 @@ export default function AddressScreen() {
                 </Pressable>
               )}
 
-              {/* Label */}
-              <Text style={styles.inputLabel}>Label</Text>
-              <TextInput
-                style={styles.input}
-                value={addLabel}
-                onChangeText={setAddLabel}
-                placeholder="Home, Office, etc."
-                placeholderTextColor={MUTED_TEXT}
-              />
-
               {/* Full Address */}
               <Text style={styles.inputLabel}>Full Address *</Text>
               <TextInput
@@ -526,22 +543,30 @@ export default function AddressScreen() {
               {/* City */}
               <Text style={styles.inputLabel}>City</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, addErrors.city ? styles.inputError : null]}
                 value={addCity}
-                onChangeText={setAddCity}
+                onChangeText={(v) => {
+                  setAddCity(v);
+                  setAddErrors((prev) => ({ ...prev, city: undefined }));
+                }}
                 placeholder="City"
                 placeholderTextColor={MUTED_TEXT}
               />
+              {addErrors.city ? <Text style={styles.fieldErrorText}>{addErrors.city}</Text> : null}
 
               {/* State */}
               <Text style={styles.inputLabel}>State</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, addErrors.state ? styles.inputError : null]}
                 value={addState}
-                onChangeText={setAddState}
+                onChangeText={(v) => {
+                  setAddState(v);
+                  setAddErrors((prev) => ({ ...prev, state: undefined }));
+                }}
                 placeholder="State"
                 placeholderTextColor={MUTED_TEXT}
               />
+              {addErrors.state ? <Text style={styles.fieldErrorText}>{addErrors.state}</Text> : null}
 
               {/* Zip Code */}
               <Text style={styles.inputLabel}>Zip Code</Text>
@@ -618,16 +643,6 @@ export default function AddressScreen() {
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
-              {/* Label */}
-              <Text style={styles.inputLabel}>Label</Text>
-              <TextInput
-                style={styles.input}
-                value={editLabel}
-                onChangeText={setEditLabel}
-                placeholder="Home, Office, etc."
-                placeholderTextColor={MUTED_TEXT}
-              />
-
               {/* Full Address */}
               <Text style={styles.inputLabel}>Full Address *</Text>
               <TextInput
@@ -653,22 +668,30 @@ export default function AddressScreen() {
               {/* City */}
               <Text style={styles.inputLabel}>City</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, editErrors.city ? styles.inputError : null]}
                 value={editCity}
-                onChangeText={setEditCity}
+                onChangeText={(v) => {
+                  setEditCity(v);
+                  setEditErrors((prev) => ({ ...prev, city: undefined }));
+                }}
                 placeholder="City"
                 placeholderTextColor={MUTED_TEXT}
               />
+              {editErrors.city ? <Text style={styles.fieldErrorText}>{editErrors.city}</Text> : null}
 
               {/* State */}
               <Text style={styles.inputLabel}>State</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, editErrors.state ? styles.inputError : null]}
                 value={editState}
-                onChangeText={setEditState}
+                onChangeText={(v) => {
+                  setEditState(v);
+                  setEditErrors((prev) => ({ ...prev, state: undefined }));
+                }}
                 placeholder="State"
                 placeholderTextColor={MUTED_TEXT}
               />
+              {editErrors.state ? <Text style={styles.fieldErrorText}>{editErrors.state}</Text> : null}
 
               {/* Zip Code */}
               <Text style={styles.inputLabel}>Zip Code</Text>
@@ -741,27 +764,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: HORIZONTAL_PADDING,
-    paddingVertical: 12,
+    paddingVertical: 6,
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: GOLD,
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerTitle: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
     color: TEXT_WHITE,
     textAlign: 'center',
   },
   addButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: GOLD,
     alignItems: 'center',
     justifyContent: 'center',

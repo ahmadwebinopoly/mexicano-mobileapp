@@ -131,7 +131,7 @@ export default function ReviewsScreen() {
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
       <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={() => navigation.goBack()} hitSlop={8}>
-          <Ionicons name="arrow-back" size={20} color={TEXT_WHITE} />
+          <Ionicons name="arrow-back" size={20} color={BG_DARK} />
         </Pressable>
         <Text style={styles.headerTitle}>Reviews</Text>
         <View style={styles.headerSpacer} />
@@ -222,24 +222,22 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(254,203,77,0.2)',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: GOLD,
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerTitle: {
     flex: 1,
-    fontSize: 18,
-    fontWeight: '800',
+    fontSize: 14,
+    fontWeight: '700',
     color: TEXT_WHITE,
     textAlign: 'center',
   },
   headerSpacer: {
-    width: 36,
+    width: 32,
   },
   hintCard: {
     flexDirection: 'row',

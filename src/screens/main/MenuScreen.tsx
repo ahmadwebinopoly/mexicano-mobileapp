@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   View,
@@ -7,14 +7,18 @@ import {
   Pressable,
   Image,
   TextInput,
+  Animated,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { ItemDetailParamItem } from './ItemDetailScreen';
 import { getMenuItems, getCachedMenuItems, type MenuItem as ApiMenuItem } from '../../api/Menu';
 import { getNetworkErrorMessage } from '../../api/apiConfig';
 import { MenuScreenSkeleton } from '../../components/skeleton/MenuScreenSkeleton';
+import { addToWishlist } from '../../api/wishlist';
+import { getToken } from '../../storagetank';
+import { navigateToLoginRegister } from '../../navigation/rootNavigationRef';
 
 type Nav = { navigate: (name: string) => void; getParent: () => { navigate: (name: string, params: object) => void } | null };
 
@@ -26,6 +30,7 @@ const GOLD_MUTED = '#E5B948';
 const TEXT_WHITE = '#FFFFFF';
 
 const HORIZONTAL_PADDING = 20;
+const TOAST_DURATION = 2400;
 
 function formatPrice(price: string): string {
   if (price == null || String(price).trim() === '') return '$0.00';
@@ -51,17 +56,41 @@ export interface MenuProduct {
   addons?: MenuAddonRaw[];
 }
 
+function normalizeSearchText(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
 interface ProductCardProps {
   item: MenuProduct;
   onPress: (item: MenuProduct) => void;
+  onAddToWishlist: (item: MenuProduct) => void;
+  isUpdating: boolean;
 }
 
-const ProductCard = memo(function ProductCard({ item, onPress }: ProductCardProps) {
+const ProductCard = memo(function ProductCard({
+  item,
+  onPress,
+  onAddToWishlist,
+  isUpdating,
+}: ProductCardProps) {
   return (
     <Pressable
       style={styles.productCard}
       onPress={() => onPress(item)}
     >
+      <Pressable
+        style={styles.addBtn}
+        onPress={(e) => {
+          e.stopPropagation();
+          onAddToWishlist(item);
+        }}
+        hitSlop={8}
+        accessibilityLabel="Add to wishlist"
+        disabled={isUpdating}
+      >
+        <MaterialIcons name="add" size={16} color={BG_DARK} />
+      </Pressable>
+
       <View style={styles.productImageWrap}>
         {item.image ? (
           <Image
@@ -134,15 +163,77 @@ function mapApiItemToMenuProduct(item: ApiMenuItem & { addons?: unknown[] }): Me
 }
 
 export default function MenuScreen() {
+  const insets = useSafeAreaInsets();
   const [searchQuery, setSearchQuery] = useState('');
   const [menuProducts, setMenuProducts] = useState<MenuProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const navigation = useNavigation<Nav>();
+  const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set());
+
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const toastOpacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!toast) return;
+    toastOpacity.setValue(0);
+    Animated.sequence([
+      Animated.timing(toastOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+      Animated.delay(TOAST_DURATION - 400),
+      Animated.timing(toastOpacity, { toValue: 0, duration: 200, useNativeDriver: true }),
+    ]).start(() => setToast(null));
+  }, [toast, toastOpacity]);
+
+  const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+  }, []);
 
   const handleItemPress = useCallback((item: MenuProduct) => {
     navigation.getParent()?.navigate('ItemDetail', { item: item as unknown as ItemDetailParamItem });
   }, [navigation]);
+
+  const handleAddToWishlist = useCallback(
+    async (item: MenuProduct) => {
+      const idStr = String(item.id);
+      const productIdNum = Number(item.id);
+      if (!Number.isFinite(productIdNum)) {
+        showToast('Invalid product id', 'error');
+        return;
+      }
+
+      const token = await getToken();
+      if (!token) {
+        showToast('Please login to use wishlist', 'error');
+        navigateToLoginRegister();
+        return;
+      }
+
+      setUpdatingIds((prev) => {
+        const next = new Set(prev);
+        next.add(idStr);
+        return next;
+      });
+
+      try {
+        await addToWishlist(productIdNum);
+        showToast('Added to wishlist', 'success');
+      } catch (e) {
+        const msg = getNetworkErrorMessage(e);
+        if (/already|exists|duplicate/i.test(msg)) {
+          showToast('Already in wishlist', 'error');
+        } else {
+          showToast(msg, 'error');
+        }
+      } finally {
+        setUpdatingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(idStr);
+          return next;
+        });
+      }
+    },
+    [showToast]
+  );
 
   useEffect(() => {
     const cached = getCachedMenuItems();
@@ -171,21 +262,29 @@ export default function MenuScreen() {
     return () => { cancelled = true; };
   }, []);
 
-  const deferredSearch = useDeferredValue(searchQuery);
-
   const filteredProducts = useMemo(() => {
-    if (!deferredSearch.trim()) return menuProducts;
-    const q = deferredSearch.toLowerCase().trim();
+    const q = normalizeSearchText(searchQuery);
+    if (!q) return menuProducts;
     return menuProducts.filter(
       (p) =>
-        p.name.toLowerCase().includes(q) ||
-        p.description.toLowerCase().includes(q)
+        normalizeSearchText(p.name).includes(q) ||
+        normalizeSearchText(p.description).includes(q)
     );
-  }, [menuProducts, deferredSearch]);
+  }, [menuProducts, searchQuery]);
 
   const renderProductItem = useCallback(
-    ({ item }: { item: MenuProduct }) => <ProductCard item={item} onPress={handleItemPress} />,
-    [handleItemPress]
+    ({ item }: { item: MenuProduct }) => {
+      const isUpdating = updatingIds.has(String(item.id));
+      return (
+        <ProductCard
+          item={item}
+          onPress={handleItemPress}
+          onAddToWishlist={handleAddToWishlist}
+          isUpdating={isUpdating}
+        />
+      );
+    },
+    [handleAddToWishlist, handleItemPress, updatingIds]
   );
 
   const keyExtractor = useCallback((item: MenuProduct) => item.id, []);
@@ -243,6 +342,23 @@ export default function MenuScreen() {
         )}
         ListFooterComponent={<View style={styles.bottomSpacer} />}
       />
+
+      {/* Wishlist toast */}
+      {toast ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.toast,
+            { bottom: insets.bottom + 90 },
+            toast.type === 'success' ? styles.toastSuccess : styles.toastError,
+            {
+              opacity: toastOpacity,
+            },
+          ]}
+        >
+          <Text style={styles.toastText} numberOfLines={2}>{toast.message}</Text>
+        </Animated.View>
+      ) : null}
 
     </SafeAreaView>
   );
@@ -309,6 +425,20 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(229,185,72,0.3)',
+    position: 'relative',
+  },
+  addBtn: {
+    position: 'absolute',
+    right: 12,
+    bottom: 12,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: GOLD,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 20,
+    elevation: 8,
   },
   productImageWrap: {
     width: '100%',
@@ -376,5 +506,34 @@ const styles = StyleSheet.create({
   },
   bottomSpacer: {
     height: 96,
+  },
+  toast: {
+    position: 'absolute',
+    left: HORIZONTAL_PADDING,
+    right: HORIZONTAL_PADDING,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    borderRadius: 12,
+    alignSelf: 'center',
+    maxWidth: '100%',
+    zIndex: 9999,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  toastSuccess: {
+    backgroundColor: 'rgba(34, 197, 94, 0.95)',
+  },
+  toastError: {
+    backgroundColor: 'rgba(239, 68, 68, 0.95)',
+  },
+  toastText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 });

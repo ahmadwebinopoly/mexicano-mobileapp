@@ -22,7 +22,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { applyDiscount } from '../../api/discounts';
 import { placeOrder } from '../../api/orders';
-import { getNetworkErrorMessage } from '../../api/apiConfig';
+import { getAppCurrency, getNetworkErrorMessage } from '../../api/apiConfig';
 import { useCart, type CartItem } from '../../contexts/CartContext';
 import { getCurrentUser } from '../../api/profile';
 import { getAddress } from '../../api/saveadresss';
@@ -93,12 +93,42 @@ function formatAddress(addr: { address?: string; city?: string; state?: string; 
   return parts.join(', ');
 }
 
+function normalizeOrderErrorMessage(error: unknown): string {
+  const raw = getNetworkErrorMessage(error);
+  const text = String(raw ?? '').trim();
+
+  // Sometimes backend message is returned as raw JSON string:
+  // {"message":"Delivery radius is disabled by admin"}
+  try {
+    const parsed = JSON.parse(text) as { message?: unknown; error?: unknown };
+    const backendMsg =
+      (typeof parsed.message === 'string' && parsed.message.trim()) ||
+      (typeof parsed.error === 'string' && parsed.error.trim()) ||
+      '';
+    if (backendMsg) {
+      if (/delivery radius.*disabled.*admin/i.test(backendMsg)) {
+        return 'Delivery is currently unavailable. Please choose Pick-up or Dining.';
+      }
+      return backendMsg;
+    }
+  } catch {
+    // raw text is not JSON; continue below
+  }
+
+  if (/delivery radius.*disabled.*admin/i.test(text)) {
+    return 'Delivery is currently unavailable. Please choose Pick-up or Dining.';
+  }
+
+  return text || 'Order failed. Please try again.';
+}
+
 type PaymentMethod = 'cod' | 'stripe';
 
 export default function CheckoutScreen() {
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
-  const { items, removeItem, updateQuantity, clearCart, total } = useCart();
+  const appCurrency = useMemo(() => getAppCurrency(), []);
+  const { items, clearCart, total } = useCart();
   const [placing, setPlacing] = useState(false);
   const [showSkeleton, setShowSkeleton] = useState(true);
   const [authChecking, setAuthChecking] = useState(true);
@@ -113,7 +143,7 @@ export default function CheckoutScreen() {
     discountAmount: number;
     subtotalAtApply: number;
   } | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cod');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
   const [cardholderName, setCardholderName] = useState('');
   const [cardDetails, setCardDetails] = useState<CardFieldInput.Details | null>(null);
   const [stripeReady, setStripeReady] = useState(false);
@@ -228,7 +258,7 @@ export default function CheckoutScreen() {
       const result = await applyDiscount({
         code,
         subtotal: sub,
-        currency: 'gbp',
+        currency: appCurrency,
         customerId: user.id,
       });
       const subNum = parseFloat(sub);
@@ -287,6 +317,11 @@ export default function CheckoutScreen() {
       return;
     }
 
+    if (paymentMethod === null) {
+      Alert.alert('Payment method', 'Please select how you would like to pay.');
+      return;
+    }
+
     if (paymentMethod === 'stripe') {
       const nameTrim = cardholderName.trim();
       if (!nameTrim) {
@@ -335,7 +370,7 @@ export default function CheckoutScreen() {
 
         const paymentIntent = await createPaymentIntent({
           amount,
-          currency: 'gbp',
+          currency: appCurrency as any,
           metadata: {
             userId: String(user?.id ?? ''),
             customer,
@@ -406,7 +441,7 @@ export default function CheckoutScreen() {
         index: 1,
       });
     } catch (err) {
-      Alert.alert('Order failed', getNetworkErrorMessage(err));
+      showToast(normalizeOrderErrorMessage(err), 'error');
     } finally {
       setPlacing(false);
     }
@@ -451,58 +486,73 @@ export default function CheckoutScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Order summary</Text>
           {items.length === 0 ? (
-            <View style={styles.emptyState}>
+            <View style={[styles.panel, styles.emptyState]}>
               <MaterialIcons name="shopping-cart" size={40} color="rgba(255,255,255,0.35)" />
               <Text style={styles.emptyStateText}>Your cart is empty</Text>
             </View>
           ) : (
-            items.map((cartItem) => (
-              <View key={cartItem.id} style={styles.cartRow}>
-                <View style={styles.cartRowImageWrap}>
-                  {cartItem.image ? (
-                    <Image source={cartItem.image} style={styles.cartRowImage} resizeMode="cover" />
-                  ) : (
-                    <View style={styles.cartRowSkeleton}>
-                      <MaterialIcons name="image-not-supported" size={20} color="rgba(255,255,255,0.35)" />
-                    </View>
-                  )}
-                </View>
-                <View style={styles.cartRowBody}>
-                  <Text style={styles.cartRowName} numberOfLines={1}>{cartItem.name}</Text>
-                  {getAddonsSubtitle(cartItem) ? (
-                    <Text style={styles.cartRowAddons} numberOfLines={1}>{getAddonsSubtitle(cartItem)}</Text>
-                  ) : null}
-                  <View style={styles.cartRowBottom}>
-                    <Text style={styles.cartRowPrice}>{formatPrice(String(getLineTotal(cartItem).toFixed(2)))}</Text>
-                    <View style={styles.quantityRow}>
-                      {cartItem.quantity <= 1 ? (
-                        <Pressable style={styles.quantityBtn} onPress={() => removeItem(cartItem.id)}>
-                          <MaterialIcons name="delete-outline" size={18} color={BG_DARK} />
-                        </Pressable>
-                      ) : (
-                        <Pressable
-                          style={styles.quantityBtn}
-                          onPress={() => updateQuantity(cartItem.id, cartItem.quantity - 1)}
-                        >
-                          <Text style={styles.quantityBtnText}>−</Text>
-                        </Pressable>
-                      )}
-                      <Text style={styles.quantityNum}>{cartItem.quantity}</Text>
-                      <Pressable
-                        style={styles.quantityBtn}
-                        onPress={() => updateQuantity(cartItem.id, cartItem.quantity + 1)}
-                      >
-                        <Text style={styles.quantityBtnText}>+</Text>
-                      </Pressable>
+            <View style={styles.summaryPanel}>
+              {items.map((cartItem, index) => (
+                <View
+                  key={cartItem.id}
+                  style={[styles.cartRow, index < items.length - 1 && styles.cartRowDivider]}
+                >
+                  <View style={styles.cartRowImageWrap}>
+                    {cartItem.image ? (
+                      <Image source={cartItem.image} style={styles.cartRowImage} resizeMode="cover" />
+                    ) : (
+                      <View style={styles.cartRowSkeleton}>
+                        <MaterialIcons name="image-not-supported" size={20} color="rgba(255,255,255,0.35)" />
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.cartRowBody}>
+                    <Text style={styles.cartRowName} numberOfLines={2}>
+                      {cartItem.name}
+                    </Text>
+                    {getAddonsSubtitle(cartItem) ? (
+                      <Text style={styles.cartRowAddons} numberOfLines={2}>
+                        Add-ons: {getAddonsSubtitle(cartItem)}
+                      </Text>
+                    ) : null}
+                    <View style={styles.cartRowBottom}>
+                      <Text style={styles.cartRowPrice}>
+                        {formatPrice(String(getLineTotal(cartItem).toFixed(2)))}
+                      </Text>
+                      <Text style={styles.qtyReadonly}>×{cartItem.quantity}</Text>
                     </View>
                   </View>
                 </View>
-              </View>
-            ))
+              ))}
+            </View>
           )}
         </View>
 
-        {/* Order notes – above Payment */}
+        {items.length > 0 ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Total bill</Text>
+            <View style={styles.totalBillPanel}>
+              <View style={styles.totalBillRow}>
+                <Text style={styles.totalBillRowLabel}>Subtotal</Text>
+                <Text style={styles.totalBillRowAmount}>{formatPrice(cartSubtotal.toFixed(2))}</Text>
+              </View>
+              {discountPreviewValid && discountPreview && discountPreview.discountAmount > 0 ? (
+                <View style={[styles.totalBillRow, styles.totalBillRowDiscount]}>
+                  <Text style={styles.totalBillRowLabel}>Discount</Text>
+                  <Text style={styles.totalBillRowAmountDiscount}>
+                    −{formatPrice(discountPreview.discountAmount.toFixed(2))}
+                  </Text>
+                </View>
+              ) : null}
+              <View style={styles.totalBillDivider} />
+              <View style={styles.totalBillRowGrand}>
+                <Text style={styles.totalBillGrandLabel}>Total</Text>
+                <Text style={styles.totalBillGrandAmount}>{formatPrice(orderToCharge.toFixed(2))}</Text>
+              </View>
+            </View>
+          </View>
+        ) : null}
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Order notes</Text>
           <TextInput
@@ -561,9 +611,9 @@ export default function CheckoutScreen() {
           ) : null}
         </View>
 
-        {/* Payment: Cash on Delivery or Stripe */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Payment</Text>
+          <View style={styles.panel}>
           <View style={styles.paymentOptions}>
             <Pressable
               style={[styles.paymentOption, paymentMethod === 'cod' && styles.paymentOptionSelected]}
@@ -638,6 +688,7 @@ export default function CheckoutScreen() {
               </View>
             )
           ) : null}
+          </View>
         </View>
 
         <View style={styles.bottomSpacer} />
@@ -648,18 +699,22 @@ export default function CheckoutScreen() {
       {/* Footer – same as OrderDetails/ItemDetail */}
       <View style={styles.bottomBar}>
         <View style={styles.totalWrap}>
+          <Text style={styles.totalLabel}>Total</Text>
           <Text style={styles.totalPrice}>{formatPrice(orderToCharge.toFixed(2))}</Text>
         </View>
         <Pressable
-          style={[styles.placeOrderBtn, (items.length === 0 || !isLoggedIn) && styles.placeOrderBtnDisabled]}
+          style={[
+            styles.placeOrderBtn,
+            (items.length === 0 || !isLoggedIn || paymentMethod === null) && styles.placeOrderBtnDisabled,
+          ]}
           onPress={handlePlaceOrder}
-          disabled={items.length === 0 || !isLoggedIn || placing}
+          disabled={items.length === 0 || !isLoggedIn || placing || paymentMethod === null}
         >
           {placing ? (
             <ActivityIndicator size="small" color={BG_DARK} />
           ) : (
             <Text style={styles.placeOrderBtnText}>
-              {paymentMethod === 'stripe' ? 'Pay' : 'Place order'}
+              {paymentMethod === 'stripe' ? 'Pay' : paymentMethod === 'cod' ? 'Place order' : 'Select payment'}
             </Text>
           )}
         </Pressable>
@@ -678,12 +733,19 @@ export default function CheckoutScreen() {
           <SafeAreaView style={styles.loginRequiredBackdrop} edges={['top', 'bottom', 'left', 'right']}>
             <Pressable
               style={StyleSheet.absoluteFill}
-              onPress={() => navigation.goBack()}
+              onPress={() => setLoginModalDismissed(true)}
             />
             <Pressable
               style={styles.loginRequiredCard}
               onPress={(e) => e.stopPropagation()}
             >
+              <Pressable
+                style={styles.loginRequiredCloseBtn}
+                onPress={() => setLoginModalDismissed(true)}
+                hitSlop={8}
+              >
+                <Ionicons name="close" size={20} color={TEXT_WHITE} />
+              </Pressable>
               <View style={styles.loginRequiredIconWrap}>
                 <Ionicons name="person-circle-outline" size={44} color={GOLD} />
               </View>
@@ -703,15 +765,6 @@ export default function CheckoutScreen() {
                   }}
                 >
                   <Text style={styles.loginRequiredPrimaryText}>Login / Register</Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.loginRequiredSecondaryBtn,
-                    pressed && styles.loginRequiredBtnPressed,
-                  ]}
-                  onPress={() => navigation.goBack()}
-                >
-                  <Text style={styles.loginRequiredSecondaryText}>Not now</Text>
                 </Pressable>
               </View>
             </Pressable>
@@ -771,6 +824,18 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     elevation: 12,
   },
+  loginRequiredCloseBtn: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    zIndex: 2,
+  },
   loginRequiredIconWrap: {
     width: 72,
     height: 72,
@@ -812,20 +877,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: BG_DARK,
   },
-  loginRequiredSecondaryBtn: {
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.25)',
-  },
-  loginRequiredSecondaryText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: MUTED_TEXT,
-  },
   loginRequiredBtnPressed: {
     opacity: 0.85,
   },
@@ -862,7 +913,74 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   section: {
-    marginBottom: 20,
+    marginBottom: 22,
+  },
+  panel: {
+    backgroundColor: CARD_BG,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(229,185,72,0.22)',
+    padding: 14,
+  },
+  summaryPanel: {
+    backgroundColor: CARD_BG,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(229,185,72,0.22)',
+    overflow: 'hidden',
+  },
+  totalBillPanel: {
+    backgroundColor: CARD_BG,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(229,185,72,0.22)',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  totalBillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  totalBillRowDiscount: {
+    marginTop: 4,
+  },
+  totalBillRowLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: MUTED_TEXT,
+  },
+  totalBillRowAmount: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: TEXT_WHITE,
+  },
+  totalBillRowAmountDiscount: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: GOLD,
+  },
+  totalBillDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    marginVertical: 10,
+  },
+  totalBillRowGrand: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  totalBillGrandLabel: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: TEXT_WHITE,
+  },
+  totalBillGrandAmount: {
+    fontFamily: 'Montserrat_700Bold',
+    fontSize: 16,
+    fontWeight: '700',
+    color: GOLD,
   },
   sectionTitle: {
     fontSize: 14,
@@ -884,13 +1002,13 @@ const styles = StyleSheet.create({
   },
   cartRow: {
     flexDirection: 'row',
-    backgroundColor: CARD_BG,
-    borderRadius: 12,
-    padding: 10,
-    marginBottom: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(229,185,72,0.2)',
     alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  cartRowDivider: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
   },
   cartRowImageWrap: {
     width: 56,
@@ -928,36 +1046,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginTop: 6,
   },
   cartRowPrice: {
     fontSize: 14,
     fontWeight: '700',
     color: GOLD,
   },
-  quantityRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  quantityBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: GOLD,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  quantityBtnText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: BG_DARK,
-  },
-  quantityNum: {
+  qtyReadonly: {
     fontSize: 13,
     fontWeight: '600',
     color: TEXT_WHITE,
-    minWidth: 20,
-    textAlign: 'center',
   },
   paymentOptions: {
     gap: 10,
@@ -966,7 +1065,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: CARD_BG,
+    backgroundColor: BG_DARK,
     borderRadius: 14,
     padding: 14,
     borderWidth: 2,
@@ -1102,6 +1201,13 @@ const styles = StyleSheet.create({
   },
   totalWrap: {
     flex: 1,
+  },
+  totalLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: MUTED_TEXT,
+    marginBottom: 2,
+    letterSpacing: 0.3,
   },
   totalPrice: {
     fontFamily: 'Montserrat_700Bold',

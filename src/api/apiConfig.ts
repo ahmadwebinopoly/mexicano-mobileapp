@@ -32,6 +32,28 @@ export function getApiBaseUrl(): string {
 }
 
 /**
+ * Currency used by mobile app for discounts + Stripe payment intent.
+ * Must match the currency configured for discount codes in admin.
+ *
+ * Resolution order:
+ * 1. EXPO_PUBLIC_CURRENCY (env)
+ * 2. expoConfig.extra.currency (app.config.js extra)
+ * 3. 'gbp' (default)
+ */
+export function getAppCurrency(): string {
+  const env =
+    typeof process !== 'undefined' && typeof process.env?.EXPO_PUBLIC_CURRENCY === 'string'
+      ? process.env.EXPO_PUBLIC_CURRENCY
+      : '';
+  const extra = Constants.expoConfig?.extra?.currency;
+  const raw =
+    (typeof env === 'string' && env.trim()) ||
+    (typeof extra === 'string' && extra.trim()) ||
+    'gbp';
+  return raw.trim().toLowerCase();
+}
+
+/**
  * User-friendly message when an API/network request fails (e.g. no connection, timeout).
  * Use this to show a clear "Network error" in the UI.
  */

@@ -17,6 +17,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import Svg, { Path } from 'react-native-svg';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
@@ -156,7 +157,6 @@ function extractCoordinatesFromMapsUrl(mapsUrl: string | undefined): Coordinates
 }
 
 export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
-  const [buttonPressed, setButtonPressed] = useState(false);
   const [selectedOption, setSelectedOption] = useState<ServiceOption>(null);
   const [orderModes, setOrderModes] = useState<OrderModes>(DEFAULT_ORDER_MODES);
   const [modesLoaded, setModesLoaded] = useState(false);
@@ -309,26 +309,33 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
     }
   }, [modesLoaded, orderModes.delivery]);
 
-  useEffect(() => {
-    const checkPendingDelivery = async () => {
-      const pending = await AsyncStorage.getItem(PENDING_DELIVERY_LOCATION_KEY);
-      if (pending === 'true') {
+  // Re-run when returning from Login/Register: mount-only effects do not fire if OnBoarding stayed mounted.
+  useFocusEffect(
+    useCallback(() => {
+      const checkPendingDelivery = async () => {
+        const pending = await AsyncStorage.getItem(PENDING_DELIVERY_LOCATION_KEY);
+        if (pending !== 'true') return;
+
         const token = await getToken();
-        if (token) {
-          await AsyncStorage.removeItem(PENDING_DELIVERY_LOCATION_KEY);
-          const hasAddress = await checkHasSavedAddress();
-          if (hasAddress) {
-            await AsyncStorage.setItem(ONBOARDING_ORDER_MODE_KEY, 'delivery');
-            onFinish();
-          } else {
-            setSelectedOption('delivery');
-            setStep('delivery_location');
-          }
+        if (!token) return;
+
+        await AsyncStorage.removeItem(PENDING_DELIVERY_LOCATION_KEY);
+        // Force a fresh address fetch now that the user is authenticated.
+        hasSavedAddressRef.current = null;
+        addressCheckInFlightRef.current = null;
+
+        const hasAddress = await checkHasSavedAddress();
+        if (hasAddress) {
+          await AsyncStorage.setItem(ONBOARDING_ORDER_MODE_KEY, 'delivery');
+          onFinish();
+        } else {
+          setSelectedOption('delivery');
+          setStep('delivery_location');
         }
-      }
-    };
-    void checkPendingDelivery();
-  }, [checkHasSavedAddress, onFinish]);
+      };
+      void checkPendingDelivery();
+    }, [checkHasSavedAddress, onFinish])
+  );
 
   const fetchMyLocation = async () => {
     try {
@@ -416,8 +423,11 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
     }
   }, [step]);
 
-  const handleContinue = async () => {
-    if (selectedOption === 'delivery') {
+  const handleSelectOption = useCallback(async (option: ServiceOption) => {
+    if (!option) return;
+    setSelectedOption(option);
+
+    if (option === 'delivery') {
       const token = await getToken();
       if (!token) {
         setShowLoginRequiredModal(true);
@@ -439,11 +449,9 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
       }
       return;
     }
-    if (selectedOption) {
-      AsyncStorage.setItem(ONBOARDING_ORDER_MODE_KEY, selectedOption);
-      onFinish();
-    }
-  };
+    await AsyncStorage.setItem(ONBOARDING_ORDER_MODE_KEY, option);
+    onFinish();
+  }, [checkHasSavedAddress, onFinish]);
 
   const handleDeliveryLocationContinue = async () => {
     const addressTrim = fullAddress.trim();
@@ -475,21 +483,21 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
       const restaurantCoords = await getRestaurantCoords();
       const radiusKm = orderModes.deliveryRadiusKm ?? 10;
       if (!restaurantCoords) {
-        Alert.alert('Delivery radius unavailable', 'Please try again later.');
-        return;
-      }
-
-      const userCoords: Coordinates = {
-        latitude: deliveryLatitude,
-        longitude: deliveryLongitude,
-      };
-      const distanceKm = calculateDistanceKm(userCoords, restaurantCoords);
-      if (distanceKm > radiusKm) {
-        Alert.alert(
-          'Out of delivery radius',
-          `Sorry, we currently deliver only within ${radiusKm} km from our restaurant.`
-        );
-        return;
+        // If restaurant coordinates can't be resolved, don't block checkout.
+        // (Geocoding/maps URL may be unavailable on some devices/networks.)
+      } else {
+        const userCoords: Coordinates = {
+          latitude: deliveryLatitude,
+          longitude: deliveryLongitude,
+        };
+        const distanceKm = calculateDistanceKm(userCoords, restaurantCoords);
+        if (distanceKm > radiusKm) {
+          Alert.alert(
+            'Out of delivery radius',
+            `Sorry, we currently deliver only within ${radiusKm} km from our restaurant.`
+          );
+          return;
+        }
       }
     }
 
@@ -746,7 +754,10 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
                       title={opt.title}
                       description={opt.description}
                       selected={selectedOption === opt.key}
-                      onPress={() => setSelectedOption(opt.key)}
+                      onPress={() => {
+                        if (checkingAddress) return;
+                        void handleSelectOption(opt.key);
+                      }}
                     />
                   ))}
                 </View>
@@ -759,34 +770,16 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
                     description={diningOption.description}
                     fullWidth
                     selected={selectedOption === 'dining'}
-                    onPress={() => setSelectedOption('dining')}
+                    onPress={() => {
+                      if (checkingAddress) return;
+                      void handleSelectOption('dining');
+                    }}
                   />
                 </View>
               )}
             </>
           )}
         </Animated.View>
-
-        {/* Continue button */}
-        <View style={styles.bottomSection}>
-          <Pressable
-            onPress={handleContinue}
-            onPressIn={() => setButtonPressed(true)}
-            onPressOut={() => setButtonPressed(false)}
-            disabled={checkingAddress}
-            style={({ pressed }) => [
-              styles.button,
-              (pressed || buttonPressed) && styles.buttonHover,
-              checkingAddress && styles.buttonDisabled,
-            ]}
-          >
-            {checkingAddress ? (
-              <ActivityIndicator size="small" color="#000" />
-            ) : (
-              <Text style={styles.buttonText}>Continue</Text>
-            )}
-          </Pressable>
-        </View>
         </>
         )}
       </ScrollView>
@@ -831,6 +824,13 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
             onPress={() => setShowLoginRequiredModal(false)}
           />
           <Pressable style={styles.loginModalCard} onPress={(e) => e.stopPropagation()}>
+            <Pressable
+              style={styles.loginModalCloseBtn}
+              onPress={() => setShowLoginRequiredModal(false)}
+              hitSlop={8}
+            >
+              <Ionicons name="close" size={20} color={TEXT_COLOR} />
+            </Pressable>
             <View style={styles.loginModalIconWrap}>
               <Ionicons name="person-circle-outline" size={48} color={BUTTON_BG} />
             </View>
@@ -848,12 +848,6 @@ export default function OnBoardingScreen({ onFinish }: OnBoardingScreenProps) {
                 }}
               >
                 <Text style={styles.loginModalPrimaryText}>Login / Register</Text>
-              </Pressable>
-              <Pressable
-                style={styles.loginModalSecondaryBtn}
-                onPress={() => setShowLoginRequiredModal(false)}
-              >
-                <Text style={styles.loginModalSecondaryText}>Not now</Text>
               </Pressable>
             </View>
           </Pressable>
@@ -995,6 +989,18 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     elevation: 12,
   },
+  loginModalCloseBtn: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    zIndex: 2,
+  },
   loginModalIconWrap: {
     width: 80,
     height: 80,
@@ -1036,21 +1042,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: '#000000',
-  },
-  loginModalSecondaryBtn: {
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.25)',
-  },
-  loginModalSecondaryText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: TEXT_COLOR,
-    opacity: 0.8,
   },
   cardsRow: {
     flexDirection: 'row',

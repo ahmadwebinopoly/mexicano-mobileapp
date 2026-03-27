@@ -64,3 +64,19 @@ export async function getMenuCategories(): Promise<MenuCategory[]> {
   const list = (json.data ?? json.categories ?? json) as MenuCategory[] | undefined;
   return Array.isArray(list) ? list : [];
 }
+
+export interface DiscoverBanner {
+  id: string;
+  imageUrl: string;
+}
+
+/**
+ * GET /api/menu/banners (placeholder)
+ *
+ * You said you'll provide the real API details later.
+ * For now, this returns an empty list so Discover falls back to the local Slider.png.
+ */
+export async function getDiscoverBanners(): Promise<DiscoverBanner[]> {
+  // TODO: replace with the real banners endpoint when you share it.
+  return [];
+}

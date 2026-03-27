@@ -16,6 +16,7 @@ import LoginRegisterScreen from '../screens/auth/LoginRegisterScreen';
 import ViewOrderDetailsScreen from '../screens/order/ViewOrderDetailsScreen';
 import ReviewsScreen from '../screens/main/ReviewsScreen';
 import RateYourFeastScreen from '../screens/main/RateYourFeastScreen';
+import WishlistScreen from '../screens/main/WishlistScreen';
 import type { ItemDetailParamItem } from '../screens/main/ItemDetailScreen';
 import { CartProvider } from '../contexts/CartContext';
 
@@ -38,6 +39,7 @@ export type RootStackParamList = {
   Orders: { showOrderSuccessToast?: boolean } | undefined;
   ViewOrderDetails: { orderId: string };
   Reviews: undefined;
+  Wishlist: undefined;
   RateYourFeast: { orderId: string; items: string; amount: string };
 };
 
@@ -77,6 +79,7 @@ export default function RootNavigator() {
         <Stack.Screen name="Orders" component={OrdersScreen} />
         <Stack.Screen name="ViewOrderDetails" component={ViewOrderDetailsScreen} />
         <Stack.Screen name="Reviews" component={ReviewsScreen} />
+        <Stack.Screen name="Wishlist" component={WishlistScreen} />
         <Stack.Screen name="RateYourFeast" component={RateYourFeastScreen} />
       </Stack.Navigator>
     </NavigationContainer>

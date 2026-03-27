@@ -6,16 +6,26 @@ import {
   Pressable,
   Image,
   ScrollView,
+  Modal,
+  ActivityIndicator,
   Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../navigation/RootNavigator';
 import type { AddonItem } from '../../api/itemDetail';
 import { useCart } from '../../contexts/CartContext';
 import { ItemDetailScreenSkeleton, SkeletonBox } from '../../components/skeleton';
+import {
+  getAllAddresses,
+  getAddress,
+  setAddressAsDefault,
+  type Address,
+} from '../../api/saveadresss';
+import { getToken } from '../../storagetank';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type ItemDetailNavigationProp = NativeStackNavigationProp<RootStackParamList, 'ItemDetail'>;
 
@@ -29,6 +39,8 @@ const TEXT_WHITE = '#FFFFFF';
 const HORIZONTAL_PADDING = 20;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const ADDON_CARD_WIDTH = (SCREEN_WIDTH - HORIZONTAL_PADDING * 2 - 12) / 2;
+const ONBOARDING_ORDER_MODE_KEY = 'onboarding_order_mode';
+type OrderMode = 'delivery' | 'dining' | 'takeaway';
 
 /** Raw addon from items API (e.g. { id, name, price }). */
 export type ItemDetailAddonRaw = {
@@ -97,11 +109,90 @@ export default function ItemDetailScreen() {
   const [addingToCart, setAddingToCart] = useState(false);
   const [showSkeleton, setShowSkeleton] = useState(true);
 
+  const [addresses, setAddresses] = useState<Address[]>([]);
+  const [defaultAddress, setDefaultAddress] = useState<Address | null>(null);
+  const [addressesLoading, setAddressesLoading] = useState(true);
+  const [chooseAddressModalVisible, setChooseAddressModalVisible] = useState(false);
+  const [orderMode, setOrderMode] = useState<OrderMode>('delivery');
+
+  useFocusEffect(
+    React.useCallback(() => {
+      let active = true;
+      (async () => {
+        try {
+          const raw = await AsyncStorage.getItem(ONBOARDING_ORDER_MODE_KEY);
+          if (!active) return;
+          if (raw === 'delivery' || raw === 'dining' || raw === 'takeaway') {
+            setOrderMode(raw);
+          } else {
+            setOrderMode('delivery');
+          }
+        } catch {
+          if (active) setOrderMode('delivery');
+        }
+      })();
+      return () => {
+        active = false;
+      };
+    }, [])
+  );
+
+  const chooseAddress = async (addressId: string) => {
+    try {
+      await setAddressAsDefault(addressId);
+      const def = await getAddress();
+      setDefaultAddress(def);
+      setChooseAddressModalVisible(false);
+    } catch {
+      // keep current selection on failure
+    }
+  };
+
   useEffect(() => {
     if (!item) return;
     const t = setTimeout(() => setShowSkeleton(false), 450);
     return () => clearTimeout(t);
   }, [item]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (orderMode !== 'delivery') {
+          if (!cancelled) {
+            setAddresses([]);
+            setDefaultAddress(null);
+            setAddressesLoading(false);
+          }
+          return;
+        }
+
+        const token = await getToken();
+        if (!token) {
+          if (!cancelled) {
+            setAddresses([]);
+            setDefaultAddress(null);
+            setAddressesLoading(false);
+          }
+          return;
+        }
+        setAddressesLoading(true);
+        const [all, def] = await Promise.all([getAllAddresses(), getAddress()]);
+        if (cancelled) return;
+        setAddresses(all);
+        setDefaultAddress(def);
+      } catch {
+        if (cancelled) return;
+        setAddresses([]);
+        setDefaultAddress(null);
+      } finally {
+        if (!cancelled) setAddressesLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [orderMode]);
 
   const toggleAddon = (id: string) => {
     setSelectedAddonIds((prev) => {
@@ -120,10 +211,10 @@ export default function ItemDetailScreen() {
 
   if (!item) {
     return (
-      <SafeAreaView style={[styles.container, styles.centered]} edges={['top', 'bottom', 'left', 'right']}>
+      <SafeAreaView style={[styles.container, styles.centered]} edges={['top', 'bottom']}>
         <Text style={styles.errorText}>No item data</Text>
         <Pressable style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color={BG_DARK} />
+          <Ionicons name="arrow-back" size={18} color={BG_DARK} />
         </Pressable>
       </SafeAreaView>
     );
@@ -131,13 +222,13 @@ export default function ItemDetailScreen() {
 
   if (showSkeleton) {
     return (
-      <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.imageContainer}>
           <View style={styles.imageWrap}>
             <View style={styles.heroImageSkeleton} />
           </View>
           <Pressable style={styles.backBtn} onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color={TEXT_WHITE} />
+            <Ionicons name="arrow-back" size={18} color={TEXT_WHITE} />
           </Pressable>
         </View>
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -152,7 +243,7 @@ export default function ItemDetailScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -170,7 +261,7 @@ export default function ItemDetailScreen() {
             )}
           </View>
           <Pressable style={styles.backBtn} onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color={TEXT_WHITE} />
+            <Ionicons name="arrow-back" size={18} color={TEXT_WHITE} />
           </Pressable>
         </View>
 
@@ -192,6 +283,32 @@ export default function ItemDetailScreen() {
             </View>
           </View>
         </View>
+
+        {/* Delivery location bar (uses saved addresses) */}
+        {orderMode === 'delivery' && defaultAddress ? (
+          <View style={styles.deliveryBar}>
+            <View style={styles.deliveryBarLeft}>
+              <Ionicons name="location-outline" size={18} color={GOLD} />
+              <View style={styles.deliveryBarTextWrap}>
+                <Text style={styles.deliveryBarTitle} numberOfLines={1}>
+                  {defaultAddress.customerLocation || 'Delivery'}
+                </Text>
+                <Text style={styles.deliveryBarSubtitle} numberOfLines={2}>
+                  {formatDeliveryAddress(defaultAddress)}
+                </Text>
+              </View>
+            </View>
+
+            {addresses.length > 1 ? (
+              <Pressable
+                style={styles.deliveryBarChangeBtn}
+                onPress={() => setChooseAddressModalVisible(true)}
+              >
+                <Text style={styles.deliveryBarChangeText}>Choose</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
 
         {/* Choose add-ons */}
         <View style={styles.addonsSection}>
@@ -231,6 +348,63 @@ export default function ItemDetailScreen() {
         <View style={styles.bottomSpacer} />
       </ScrollView>
 
+      {/* Choose delivery address modal */}
+      <Modal
+        visible={orderMode === 'delivery' && chooseAddressModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setChooseAddressModalVisible(false)}
+      >
+        <SafeAreaView style={styles.modalBackdrop} edges={['top', 'bottom']}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setChooseAddressModalVisible(false)}
+          />
+          <View style={styles.addressModalCard}>
+            <Text style={styles.addressModalTitle}>Choose delivery address</Text>
+            <Text style={styles.addressModalSubtitle}>Select one of your saved locations</Text>
+
+            {addressesLoading ? (
+              <View style={styles.addressModalLoading}>
+                <ActivityIndicator size="small" color={GOLD} />
+              </View>
+            ) : (
+              <ScrollView
+                style={styles.addressModalScroll}
+                contentContainerStyle={styles.addressModalScrollContent}
+                showsVerticalScrollIndicator={false}
+              >
+                {addresses.map((addr) => {
+                  const isSelected = addr.id === defaultAddress?.id;
+                  return (
+                    <Pressable
+                      key={addr.id}
+                      style={[styles.addressOption, isSelected && styles.addressOptionSelected]}
+                      onPress={() => void chooseAddress(addr.id)}
+                    >
+                      <Ionicons name="location-outline" size={18} color={GOLD} />
+                      <View style={styles.addressOptionTextWrap}>
+                        <Text style={styles.addressOptionTitle} numberOfLines={1}>
+                          {addr.customerLocation || 'Delivery'}
+                        </Text>
+                        <Text style={styles.addressOptionSubtitle} numberOfLines={2}>
+                          {formatDeliveryAddress(addr)}
+                        </Text>
+                      </View>
+                      {isSelected ? (
+                        <MaterialIcons name="check-circle" size={18} color={GOLD} />
+                      ) : (
+                        <MaterialIcons name="chevron-right" size={18} color="rgba(255,255,255,0.35)" />
+                      )}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            )}
+          </View>
+        </SafeAreaView>
+      </Modal>
+
       {/* Add to cart section – last of screen, within safe area */}
       <View style={styles.bottomBar}>
         <View style={styles.totalWrap}>
@@ -264,6 +438,15 @@ export default function ItemDetailScreen() {
   );
 }
 
+function formatDeliveryAddress(addr: Address): string {
+  const parts = [
+    addr.address?.trim(),
+    addr.state?.trim(),
+    addr.zipCode?.trim(),
+  ].filter(Boolean);
+  return parts.join(', ');
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -284,15 +467,15 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   imageContainer: {
-    paddingHorizontal: HORIZONTAL_PADDING,
+    paddingHorizontal: 0,
     paddingTop: 12,
     paddingBottom: 16,
     position: 'relative',
   },
   imageWrap: {
     width: '100%',
-    aspectRatio: 16 / 10,
-    maxHeight: 240,
+    aspectRatio: 16 / 9,
+    maxHeight: 280,
     backgroundColor: CARD_BG,
     borderRadius: 16,
     overflow: 'hidden',
@@ -310,11 +493,11 @@ const styles = StyleSheet.create({
   },
   backBtn: {
     position: 'absolute',
-    left: HORIZONTAL_PADDING + 8,
-    top: 24,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    left: 12,
+    top: 18,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: 'rgba(0,0,0,0.35)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -369,6 +552,125 @@ const styles = StyleSheet.create({
     paddingHorizontal: HORIZONTAL_PADDING,
     paddingTop: 10,
     paddingBottom: 8,
+  },
+  deliveryBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: HORIZONTAL_PADDING,
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  deliveryBarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 10,
+    backgroundColor: 'rgba(254, 203, 77, 0.08)',
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+  },
+  deliveryBarTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  deliveryBarTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: TEXT_WHITE,
+    marginBottom: 2,
+  },
+  deliveryBarSubtitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.75)',
+  },
+  deliveryBarChangeBtn: {
+    marginLeft: 10,
+    backgroundColor: GOLD,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+  },
+  deliveryBarChangeText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: BG_DARK,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  addressModalCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: CARD_BG,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(254, 203, 77, 0.25)',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 10,
+    maxHeight: '80%',
+  },
+  addressModalTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: TEXT_WHITE,
+    marginBottom: 4,
+  },
+  addressModalSubtitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.65)',
+    marginBottom: 12,
+  },
+  addressModalLoading: {
+    paddingVertical: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addressModalScroll: {
+    width: '100%',
+    flexGrow: 0,
+  },
+  addressModalScrollContent: {
+    paddingBottom: 10,
+  },
+  addressOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    marginBottom: 10,
+  },
+  addressOptionSelected: {
+    borderColor: 'rgba(254,203,77,0.65)',
+    backgroundColor: 'rgba(254,203,77,0.10)',
+  },
+  addressOptionTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  addressOptionTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: TEXT_WHITE,
+    marginBottom: 2,
+  },
+  addressOptionSubtitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.7)',
   },
   addonsTitle: {
     fontFamily: 'Montserrat_700Bold',

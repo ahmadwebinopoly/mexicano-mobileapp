@@ -33,6 +33,15 @@ const HORIZONTAL_PADDING = 20;
 type AuthTab = 'Login' | 'Register';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_REGEX = /^[+]?[\d\s\-()]{7,20}$/;
+
+function normalizeLoginErrorMessage(error: unknown): string {
+  const msg = error instanceof Error ? error.message : String(error ?? '');
+  if (/invalid|credential|unauthorized|401|wrong password|incorrect password|user not found/i.test(msg)) {
+    return 'Please enter valid credentials';
+  }
+  return msg || 'Login failed.';
+}
 
 
 
@@ -51,6 +60,12 @@ export default function LoginRegisterScreen() {
   const [regPassword, setRegPassword] = useState('');
   const [regSubmitting, setRegSubmitting] = useState(false);
   const [googleSubmitting, setGoogleSubmitting] = useState(false);
+  const [regErrors, setRegErrors] = useState<{
+    name?: string;
+    phone?: string;
+    email?: string;
+    password?: string;
+  }>({});
 
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const toastOpacity = useRef(new Animated.Value(0)).current;
@@ -165,7 +180,7 @@ export default function LoginRegisterScreen() {
       showToast('Signed in successfully.', 'success');
       setTimeout(() => navigation.goBack(), 800);
     } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Login failed.', 'error');
+      showToast(normalizeLoginErrorMessage(e), 'error');
     } finally {
       setLoginSubmitting(false);
     }
@@ -174,25 +189,37 @@ export default function LoginRegisterScreen() {
 
 
   const handleRegister = async () => {
+    const name = regName.trim();
+    const phone = regPhone.trim();
     const email = regEmail.trim();
     const password = regPassword.trim();
-    if (!email || !password) {
-      showToast('Please enter email and password.', 'error');
+
+    const nextErrors: {
+      name?: string;
+      phone?: string;
+      email?: string;
+      password?: string;
+    } = {};
+
+    if (!name) nextErrors.name = 'Name is required.';
+    if (!phone) nextErrors.phone = 'Phone number is required.';
+    else if (!PHONE_REGEX.test(phone)) nextErrors.phone = 'Please enter a valid phone number.';
+    if (!email) nextErrors.email = 'Email is required.';
+    else if (!EMAIL_REGEX.test(email)) nextErrors.email = 'Please enter a valid email address.';
+    if (!password) nextErrors.password = 'Password is required.';
+    else if (password.length < 6) nextErrors.password = 'Password must be at least 6 characters.';
+
+    if (Object.keys(nextErrors).length > 0) {
+      setRegErrors(nextErrors);
       return;
     }
-    if (!EMAIL_REGEX.test(email)) {
-      showToast('Please enter a valid email address.', 'error');
-      return;
-    }
-    if (password.length < 6) {
-      showToast('Password must be at least 6 characters.', 'error');
-      return;
-    }
+
+    setRegErrors({});
     setRegSubmitting(true);
     try {
       await registerApi({
-        name: regName.trim() || undefined,
-        phone: regPhone.trim() || undefined,
+        name,
+        phone,
         email,
         password,
       });
@@ -213,17 +240,10 @@ export default function LoginRegisterScreen() {
       setRegPhone('');
       setRegEmail('');
       setRegPassword('');
-
-      // Always leave the auth screen after registration attempt.
-      // ProfileScreen will re-load the user on focus.
-      showToast(
-        user ? 'Account created and signed in.' : 'Account created. Checking your profile...',
-        'success'
-      );
-      setTimeout(() => navigation.goBack(), 600);
+      setRegErrors({});
+      navigation.goBack();
     } catch (e) {
       // If auto-login fails, fall back to showing the Login tab.
-      showToast(e instanceof Error ? e.message : 'Registration failed.', 'error');
       setAuthTab('Login');
     } finally {
       setRegSubmitting(false);
@@ -328,7 +348,7 @@ export default function LoginRegisterScreen() {
                 <Pressable
                   style={styles.socialButton}
                   onPress={() => {
-                    showToast('Facebook login coming soon', 'error');
+                    // Reserved for future Facebook auth integration.
                   }}
                 >
                   <FontAwesome name="facebook" size={20} color="#1877F2" />
@@ -339,27 +359,39 @@ export default function LoginRegisterScreen() {
           ) : (
             <>
               <View style={styles.formGroup}>
-                <Text style={styles.label}>Name</Text>
+                <Text style={styles.label}>Name *</Text>
                 <TextInput
                   style={styles.input}
                   placeholder="John Doe"
                   placeholderTextColor={MUTED_TEXT}
                   value={regName}
-                  onChangeText={setRegName}
+                  onChangeText={(t) => {
+                    setRegName(t);
+                    if (regErrors.name) {
+                      setRegErrors((prev) => ({ ...prev, name: undefined }));
+                    }
+                  }}
                   editable={!regSubmitting}
                 />
+                {regErrors.name ? <Text style={styles.fieldErrorText}>{regErrors.name}</Text> : null}
               </View>
               <View style={styles.formGroup}>
-                <Text style={styles.label}>Phone</Text>
+                <Text style={styles.label}>Phone *</Text>
                 <TextInput
                   style={styles.input}
                   placeholder="+1 555 123 4567"
                   placeholderTextColor={MUTED_TEXT}
                   keyboardType="phone-pad"
                   value={regPhone}
-                  onChangeText={setRegPhone}
+                  onChangeText={(t) => {
+                    setRegPhone(t);
+                    if (regErrors.phone) {
+                      setRegErrors((prev) => ({ ...prev, phone: undefined }));
+                    }
+                  }}
                   editable={!regSubmitting}
                 />
+                {regErrors.phone ? <Text style={styles.fieldErrorText}>{regErrors.phone}</Text> : null}
               </View>
               <View style={styles.formGroup}>
                 <Text style={styles.label}>Email *</Text>
@@ -370,9 +402,15 @@ export default function LoginRegisterScreen() {
                   keyboardType="email-address"
                   autoCapitalize="none"
                   value={regEmail}
-                  onChangeText={setRegEmail}
+                  onChangeText={(t) => {
+                    setRegEmail(t);
+                    if (regErrors.email) {
+                      setRegErrors((prev) => ({ ...prev, email: undefined }));
+                    }
+                  }}
                   editable={!regSubmitting}
                 />
+                {regErrors.email ? <Text style={styles.fieldErrorText}>{regErrors.email}</Text> : null}
               </View>
               <View style={styles.formGroup}>
                 <Text style={styles.label}>Password *</Text>
@@ -382,9 +420,15 @@ export default function LoginRegisterScreen() {
                   placeholderTextColor={MUTED_TEXT}
                   secureTextEntry
                   value={regPassword}
-                  onChangeText={setRegPassword}
+                  onChangeText={(t) => {
+                    setRegPassword(t);
+                    if (regErrors.password) {
+                      setRegErrors((prev) => ({ ...prev, password: undefined }));
+                    }
+                  }}
                   editable={!regSubmitting}
                 />
+                {regErrors.password ? <Text style={styles.fieldErrorText}>{regErrors.password}</Text> : null}
               </View>
               <Pressable
                 style={[styles.primaryButton, regSubmitting && styles.primaryButtonDisabled]}
@@ -535,6 +579,12 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(254,185,72,0.25)',
     fontSize: 13,
     color: TEXT_WHITE,
+  },
+  fieldErrorText: {
+    marginTop: 6,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FF8A80',
   },
   primaryButton: {
     backgroundColor: GOLD,

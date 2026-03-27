@@ -48,7 +48,7 @@ export default function OrderDetailsScreen() {
             </View>
           </View>
           <Pressable style={styles.backBtn} onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color={TEXT_WHITE} />
+            <Ionicons name="arrow-back" size={18} color={TEXT_WHITE} />
           </Pressable>
         </View>
         <View style={styles.detailSection}>
@@ -72,16 +72,13 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   imageContainer: {
-    paddingHorizontal: HORIZONTAL_PADDING,
-    paddingTop: 12,
-    paddingBottom: 16,
+    paddingTop: 8,
+    paddingBottom: 10,
     position: 'relative',
   },
   imageWrap: {
     width: '100%',
-    aspectRatio: 16 / 10,
-    maxHeight: 240,
-    borderRadius: 16,
+    aspectRatio: 16 / 9,
     overflow: 'hidden',
     backgroundColor: CARD_BG,
   },
@@ -97,27 +94,28 @@ const styles = StyleSheet.create({
   },
   backBtn: {
     position: 'absolute',
-    left: HORIZONTAL_PADDING + 8,
-    top: 24,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    left: 10,
+    top: 18,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: 'rgba(0,0,0,0.35)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   detailSection: {
     paddingHorizontal: HORIZONTAL_PADDING,
-    paddingTop: 16,
+    paddingTop: 8,
   },
   placeholderTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: TEXT_WHITE,
+    marginBottom: 2,
   },
   placeholderSub: {
     fontSize: 14,
     color: 'rgba(255,255,255,0.6)',
-    marginTop: 8,
+    marginTop: 2,
   },
 });

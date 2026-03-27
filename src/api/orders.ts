@@ -78,17 +78,39 @@ export async function placeOrder(payload: PlaceOrderPayload): Promise<PlaceOrder
   }
 
   if (paymentMethod != null && String(paymentMethod).trim() !== '') {
-    body.paymentMethod = paymentMethod;
-    body.payment_method = paymentMethod;
+    const pm = String(paymentMethod).trim();
+    body.paymentMethod = pm;
+    body.payment_method = pm;
+    // Compatibility aliases (some backends/admin portals read different keys)
+    body.payMethod = pm;
+    body.pay_method = pm;
+    body.paymentMode = pm;
+    body.payment_mode = pm;
+    body.paymentType = pm;
+    body.payment_type = pm;
+    // Also send a normalized code (helps when backend expects 'stripe'/'cod')
+    body.payment_method_code = pm.toLowerCase();
   }
   if (paymentStatus != null && String(paymentStatus).trim() !== '') {
-    body.paymentStatus = paymentStatus;
-    body.payment_status = paymentStatus;
+    const ps = String(paymentStatus).trim();
+    body.paymentStatus = ps;
+    body.payment_status = ps;
+    // Compatibility aliases
+    body.payStatus = ps;
+    body.pay_status = ps;
+    body.paymentState = ps;
+    body.payment_state = ps;
+    body.payment_status_code = ps.toLowerCase();
   }
   const idTrim = paymentId != null ? String(paymentId).trim() : '';
   if (idTrim) {
     body.paymentId = idTrim;
     body.payment_id = idTrim;
+    // Compatibility aliases
+    body.transactionId = idTrim;
+    body.transaction_id = idTrim;
+    body.paymentIntentId = idTrim;
+    body.payment_intent_id = idTrim;
   }
 
   const res = await fetch(ORDERS_URL, {
