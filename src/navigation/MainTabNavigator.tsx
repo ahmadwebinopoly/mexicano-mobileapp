@@ -10,6 +10,8 @@ import ContactScreen from '../screens/extra/ContactScreen';
 import StoryScreen from '../screens/extra/StoryScreen';
 import ProfileScreen from '../screens/main/ProfileScreen';
 import { startOrdersPolling, stopOrdersPolling, type Order } from '../api/myorder';
+import { getToken } from '../storagetank';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const Tab = createBottomTabNavigator();
 
@@ -18,6 +20,7 @@ const BG_DARK = '#0B1D1B';
 const GOLD = '#FECB4D';
 const TEXT_WHITE = '#FFFFFF';
 const MUTED_TEXT = 'rgba(255,255,255,0.72)';
+const TRACKER_DISMISSED_CANCELLED_ORDER_ID_KEY = 'tracker_dismissed_cancelled_order_id';
 
 function normalizeStatus(status: string | undefined): string {
   return (status || '').trim().toLowerCase();
@@ -39,14 +42,28 @@ function getStatusBadgeLabel(status: string | undefined): string {
   if (s.includes('ready')) return 'READY';
   if (s.includes('prepar')) return 'PREPARING';
   if (s.includes('pending')) return 'ORDER IN PROGRESS';
+  if (s.includes('cancel')) return 'CANCELLED';
   return 'ORDER IN PROGRESS';
+}
+
+function getExactStatusLabel(status: string | undefined): string {
+  const raw = String(status ?? '').trim();
+  if (raw) {
+    const normalized = raw.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return normalized
+      .split(' ')
+      .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : ''))
+      .join(' ');
+  }
+  return 'Pending';
 }
 
 function isTrackableStatus(status: string | undefined): boolean {
   const s = normalizeStatus(status);
   if (!s) return false;
   if (s.includes('deliver') && !s.includes('out')) return false; // Delivered
-  if (s.includes('cancel')) return false; // Cancelled
+  if (s.includes('complete') || s.includes('completed')) return false; // Completed
+  if (s.includes('done') || s.includes('finish')) return false; // Finished
   return true; // Pending/Preparing/Ready/Out for delivery
 }
 
@@ -78,20 +95,37 @@ const TRACK_STEPS: { key: string; label: string }[] = [
   { key: 'delivered', label: 'Delivered' },
 ];
 
+const CANCELLED_STEP: { key: string; label: string } = { key: 'cancelled', label: 'Cancelled' };
+const CANCELLED_COLOR = '#EF4444';
+
 function StatusProgressLine({
   steps,
   activeIndex,
+  cancelledKey,
 }: {
   steps: { key: string; label: string }[];
   activeIndex: number;
+  cancelledKey?: string;
 }) {
+  const cancelKey = cancelledKey ?? 'cancelled';
+  const cancelledActive = steps[activeIndex]?.key === cancelKey;
   return (
     <View style={styles.progressWrap}>
       <View style={styles.progressRow}>
         {steps.map((step, i) => {
           const reached = activeIndex >= i;
-          const left = i === 0 ? 'transparent' : activeIndex >= i ? GOLD : 'rgba(255,255,255,0.14)';
-          const right = i === steps.length - 1 ? 'transparent' : activeIndex > i ? GOLD : 'rgba(255,255,255,0.14)';
+          const segReachedColor = cancelledActive ? CANCELLED_COLOR : GOLD;
+          const left =
+            i === 0 ? 'transparent' : activeIndex >= i ? segReachedColor : 'rgba(255,255,255,0.14)';
+          const right =
+            i === steps.length - 1 ? 'transparent' : activeIndex > i ? segReachedColor : 'rgba(255,255,255,0.14)';
+
+          const isCancelStep = step.key === cancelKey;
+          const isCurrent = activeIndex === i;
+          const dotFill =
+            isCancelStep && isCurrent ? CANCELLED_COLOR : reached ? GOLD : 'transparent';
+          const borderColor =
+            isCancelStep && isCurrent ? CANCELLED_COLOR : reached ? GOLD : 'rgba(255,255,255,0.28)';
           return (
             <View key={step.key} style={styles.progressCol}>
               <View style={styles.trackRow}>
@@ -99,12 +133,21 @@ function StatusProgressLine({
                 <View
                   style={[
                     styles.dot,
-                    { backgroundColor: reached ? GOLD : 'transparent', borderColor: reached ? GOLD : 'rgba(255,255,255,0.28)' },
+                    { backgroundColor: dotFill, borderColor },
                   ]}
                 />
                 <View style={[styles.trackSeg, { backgroundColor: right }]} />
               </View>
-              <Text style={[styles.progressLabel, !reached && { color: 'rgba(255,255,255,0.34)' }]} numberOfLines={2}>
+              <Text
+                style={[
+                  styles.progressLabel,
+                  {
+                    color: isCancelStep && isCurrent ? CANCELLED_COLOR : reached ? GOLD : 'rgba(255,255,255,0.34)',
+                    fontWeight: isCancelStep && isCurrent ? '800' : undefined,
+                  },
+                ]}
+                numberOfLines={2}
+              >
                 {step.label}
               </Text>
             </View>
@@ -192,6 +235,37 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '800',
     color: GOLD,
+  },
+  dismissBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: TAB_BAR_BG,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 12,
+  },
+  trackBtnTextCancelled: {
+    color: TEXT_WHITE,
+  },
+  cancelBanner: {
+    marginTop: 10,
+    marginHorizontal: 14,
+    backgroundColor: 'rgba(239,68,68,0.14)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.35)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  cancelBannerText: {
+    color: '#FCA5A5',
+    fontSize: 12,
+    fontWeight: '800',
+    flex: 1,
   },
   modalBackdrop: {
     flex: 1,
@@ -373,23 +447,70 @@ export default function MainTabNavigator() {
   const insets = useSafeAreaInsets();
   const [activeOrders, setActiveOrders] = useState<Order[]>([]);
   const [trackingOpen, setTrackingOpen] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [dismissedCancelledOrderId, setDismissedCancelledOrderId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const syncAuthState = async () => {
+      const token = await getToken();
+      if (!mounted) return;
+      const ok = !!token;
+      setIsAuthenticated(ok);
+      if (!ok) {
+        setActiveOrders([]);
+        setTrackingOpen(false);
+      }
+    };
+
+    void syncAuthState();
+    const id = setInterval(() => {
+      void syncAuthState();
+    }, 1200);
+
+    return () => {
+      mounted = false;
+      clearInterval(id);
+    };
+  }, []);
 
   useEffect(() => {
     startOrdersPolling(
       (data) => {
-        const current = Array.isArray(data.current) ? data.current : [];
-        const trackable = current.filter((o) => isTrackableStatus(o.status));
-        const sorted = [...trackable].sort((a, b) => {
-          const ta = new Date(a.date || a.createdAt).getTime();
-          const tb = new Date(b.date || b.createdAt).getTime();
-          return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
-        });
-        setActiveOrders(sorted);
+        void (async () => {
+          const token = await getToken();
+          if (!token) {
+            setIsAuthenticated(false);
+            setActiveOrders([]);
+            setTrackingOpen(false);
+            return;
+          }
+          setIsAuthenticated(true);
+
+          const current = Array.isArray(data.current) ? data.current : [];
+          const history = Array.isArray(data.history) ? data.history : [];
+
+          // Some backends move cancelled orders to `history`. Include cancelled orders from both lists
+          // so the tracker can turn red even after cancellation.
+          const trackableCurrent = current.filter((o) => isTrackableStatus(o.status));
+          const trackableCancelledHistory = history.filter((o) => normalizeStatus(o.status).includes('cancel'));
+
+          const trackable = [...trackableCurrent, ...trackableCancelledHistory];
+
+          const sorted = [...trackable].sort((a, b) => {
+            const ta = new Date(a.date || a.createdAt).getTime();
+            const tb = new Date(b.date || b.createdAt).getTime();
+            return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+          });
+          setActiveOrders(sorted);
+        })();
       },
       () => {
+        setIsAuthenticated(false);
         setActiveOrders([]);
+        setTrackingOpen(false);
       },
-      3000
+      2000
     );
 
     return () => {
@@ -399,19 +520,66 @@ export default function MainTabNavigator() {
 
   const trackerBottom = useMemo(() => 82, []);
   const activeOrder = activeOrders[0] ?? null;
-  const activeIndex = useMemo(() => mapStatusToFiveStepIndex(activeOrder?.status), [activeOrder?.status]);
+  const hasSingleActiveOrder = activeOrders.length === 1;
+  const hasMultipleActiveOrders = activeOrders.length > 1;
+  const isCancelled = useMemo(
+    () => normalizeStatus(activeOrder?.status).includes('cancel'),
+    [activeOrder?.status]
+  );
+  const shouldHideTrackerBar = useMemo(() => {
+    if (!activeOrder) return false;
+    if (!isCancelled) return false;
+    if (!dismissedCancelledOrderId) return false;
+    return String(activeOrder.id) === String(dismissedCancelledOrderId);
+  }, [activeOrder, isCancelled, dismissedCancelledOrderId]);
+  const activeIndex = useMemo(() => {
+    if (isCancelled) return TRACK_STEPS.length; // last index (cancelled)
+    return mapStatusToFiveStepIndex(activeOrder?.status);
+  }, [activeOrder?.status, isCancelled]);
   const badge = useMemo(() => getStatusBadgeLabel(activeOrder?.status), [activeOrder?.status]);
+  const currentStatusLabel = useMemo(
+    () => getExactStatusLabel(activeOrder?.status),
+    [activeOrder?.status]
+  );
   const etaText = useMemo(() => {
     if (!activeOrder) return 'Order in process';
+    if (isCancelled) return 'Order cancelled';
     if (normalizeStatus(activeOrder.status).includes('out')) return 'Arriving soon';
     if (normalizeStatus(activeOrder.status).includes('ready')) return 'Ready now';
     return 'Order in process';
-  }, [activeOrder]);
+  }, [activeOrder, isCancelled]);
   const orderItemLines = useMemo(() => splitOrderItems(activeOrder?.items), [activeOrder?.items]);
   const trackerIconName = useMemo(
     () => trackerIconForOrderType(activeOrder?.type),
     [activeOrder?.type]
   );
+
+  // Guardrail: modal is only for a single active order.
+  useEffect(() => {
+    if (!hasSingleActiveOrder && trackingOpen) {
+      setTrackingOpen(false);
+    }
+  }, [hasSingleActiveOrder, trackingOpen]);
+
+  useEffect(() => {
+    let cancelled = false;
+    AsyncStorage.getItem(TRACKER_DISMISSED_CANCELLED_ORDER_ID_KEY)
+      .then((v) => {
+        if (cancelled) return;
+        setDismissedCancelledOrderId(v ? String(v) : null);
+      })
+      .catch(() => {
+        // ignore
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // If an order becomes cancelled, ensure the tracking modal is not left open.
+  useEffect(() => {
+    if (isCancelled) setTrackingOpen(false);
+  }, [isCancelled]);
 
   return (
     <View style={{ flex: 1 }}>
@@ -457,16 +625,25 @@ export default function MainTabNavigator() {
         <Tab.Screen name="Profile" component={ProfileScreen} />
       </Tab.Navigator>
 
-      {activeOrder ? (
+      {isAuthenticated && activeOrder && !shouldHideTrackerBar ? (
         <View pointerEvents="box-none" style={[styles.trackerBarWrap, { bottom: trackerBottom }]}>
           <Pressable
-            style={styles.trackerBar}
+            style={[
+              styles.trackerBar,
+              isCancelled && {
+                backgroundColor: CANCELLED_COLOR,
+                borderColor: 'rgba(239,68,68,0.35)',
+              },
+            ]}
             onPress={() => {
-              if (activeOrders.length > 1) {
-                navigation.navigate('ViewOrderDetails', { orderId: String(activeOrder.id) });
+              if (isCancelled) return;
+              if (hasMultipleActiveOrders) {
+                navigation.navigate('Orders', { initialTab: 'current' });
                 return;
               }
-              setTrackingOpen(true);
+              if (hasSingleActiveOrder) {
+                setTrackingOpen(true);
+              }
             }}
           >
             <View style={styles.trackerBarLeft}>
@@ -480,15 +657,32 @@ export default function MainTabNavigator() {
                 </Text>
               </View>
             </View>
-            <View style={styles.trackBtn}>
-              <Text style={styles.trackBtnText}>TRACK</Text>
-            </View>
+            {!isCancelled ? (
+              <View style={styles.trackBtn}>
+                <Text style={styles.trackBtnText}>TRACK</Text>
+              </View>
+            ) : (
+              <Pressable
+                style={styles.dismissBtn}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  setTrackingOpen(false);
+                  if (activeOrder) {
+                    const orderId = String(activeOrder.id);
+                    setDismissedCancelledOrderId(orderId);
+                    AsyncStorage.setItem(TRACKER_DISMISSED_CANCELLED_ORDER_ID_KEY, orderId).catch(() => {});
+                  }
+                }}
+              >
+                <Ionicons name="close" size={20} color={TEXT_WHITE} />
+              </Pressable>
+            )}
           </Pressable>
         </View>
       ) : null}
 
       <Modal
-        visible={trackingOpen && !!activeOrder && activeOrders.length === 1}
+        visible={isAuthenticated && trackingOpen && !!activeOrder && hasSingleActiveOrder}
         transparent
         animationType="slide"
         onRequestClose={() => setTrackingOpen(false)}
@@ -501,15 +695,33 @@ export default function MainTabNavigator() {
             <View style={styles.modalTop}>
               <View style={styles.modalTopLeft}>
                 <Text style={styles.modalTitle}>Order Tracker</Text>
-                <Text style={styles.modalHeaderStatus}>{badge}</Text>
+                <Text
+                  style={[
+                    styles.modalHeaderStatus,
+                    isCancelled && { color: CANCELLED_COLOR },
+                  ]}
+                >
+                  {currentStatusLabel}
+                </Text>
               </View>
               <Pressable onPress={() => setTrackingOpen(false)} hitSlop={8}>
                 <Ionicons name="close" size={22} color={TEXT_WHITE} />
               </Pressable>
             </View>
-            <Text style={styles.modalEta}>Order Status</Text>
+            <Text style={styles.modalEta}>Order Status: {currentStatusLabel}</Text>
 
-            <StatusProgressLine steps={TRACK_STEPS} activeIndex={activeIndex} />
+            {isCancelled ? (
+              <View style={styles.cancelBanner}>
+                <Ionicons name="close-circle" size={16} color={CANCELLED_COLOR} />
+                <Text style={styles.cancelBannerText}>This order was cancelled.</Text>
+              </View>
+            ) : null}
+
+            <StatusProgressLine
+              steps={isCancelled ? [...TRACK_STEPS, CANCELLED_STEP] : TRACK_STEPS}
+              activeIndex={activeIndex}
+              cancelledKey="cancelled"
+            />
 
             <View style={styles.itemsPanel}>
               <View style={styles.itemsPanelHeader}>

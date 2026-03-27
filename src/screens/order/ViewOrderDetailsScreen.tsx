@@ -17,8 +17,6 @@ import { getNetworkErrorMessage } from '../../api/apiConfig';
 import { getVisit, type VisitLocation } from '../../api/content';
 import {
   getMyOrders,
-  startOrdersPolling,
-  stopOrdersPolling,
   type MyOrdersResponse,
   type Order,
 } from '../../api/myorder';
@@ -438,25 +436,29 @@ export default function ViewOrderDetailsScreen() {
       let isMounted = true;
       setErrorMsg(null);
 
-      startOrdersPolling(
-        (data) => {
+      const poll = async () => {
+        try {
+          const data = await getMyOrders();
           if (!isMounted) return;
           const found = findOrderInResponse(data);
           setOrder(found);
           setLoading(false);
-        },
-        (error) => {
+        } catch (error) {
           if (!isMounted) return;
           setLoading(false);
-          setErrorMsg(error.message);
+          setErrorMsg(getNetworkErrorMessage(error));
           setOrder(null);
-        },
-        2000
-      );
+        }
+      };
+
+      void poll();
+      const intervalId = setInterval(() => {
+        void poll();
+      }, 2000);
 
       return () => {
         isMounted = false;
-        stopOrdersPolling();
+        clearInterval(intervalId);
       };
     }, [findOrderInResponse])
   );

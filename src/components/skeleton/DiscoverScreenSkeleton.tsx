@@ -12,19 +12,21 @@ const GRID_CELL_WIDTH = '48%';
 const CARD_BORDER_COLOR = 'rgba(229,185,72,0.3)';
 const CARD_BORDER_WIDTH = 1;
 const CARD_BORDER_RADIUS = 16;
-const CARD_MIN_HEIGHT = 155;
-const CARD_PADDING = 12;
+const CARD_HEIGHT = 248;
+const CARD_PADDING_HORIZONTAL = 12;
+const CARD_PADDING_TOP = 12;
+const CARD_PADDING_BOTTOM = 14;
 
-const CIRCLE_SIZE = 80;
-const CIRCLE_RADIUS = 40;
-const HEART_SIZE = 26;
+const CIRCLE_SIZE = 126;
+const CIRCLE_RADIUS = 63;
+const QUICK_ADD_SIZE = 34;
 
 const BOTTOM_SPACER_HEIGHT = 96;
 
 function GridCardSkeleton({ keyPrefix }: { keyPrefix: string }) {
   return (
     <View style={styles.productGridCard}>
-      {/* Top row: star + rating (left) and heart button (right) */}
+      {/* Top row: star + rating (left) */}
       <View style={styles.productGridTopRow}>
         <View style={styles.productGridTopLeftRow}>
           <SkeletonBox
@@ -44,15 +46,6 @@ function GridCardSkeleton({ keyPrefix }: { keyPrefix: string }) {
             pulse={true}
           />
         </View>
-
-        <SkeletonBox
-          width={HEART_SIZE}
-          height={HEART_SIZE}
-          borderRadius={HEART_SIZE / 2}
-          key={`${keyPrefix}-heart`}
-          style={{ backgroundColor: 'rgba(254, 203, 77, 0.18)' }}
-          pulse={true}
-        />
       </View>
 
       {/* Image circle */}
@@ -70,21 +63,29 @@ function GridCardSkeleton({ keyPrefix }: { keyPrefix: string }) {
       {/* Name */}
       <SkeletonBox
         width="92%"
-        height={14}
+        height={16}
         borderRadius={7}
         key={`${keyPrefix}-name`}
-        style={{ marginTop: 2, backgroundColor: 'rgba(255,255,255,0.08)' }}
+        style={{ marginTop: 0, marginBottom: 6, backgroundColor: 'rgba(255,255,255,0.08)' }}
         pulse={true}
       />
 
-      {/* Bottom row: price only */}
+      {/* Bottom row: price + quick-add button */}
       <View style={styles.productGridBottomRow}>
         <SkeletonBox
           width={64}
-          height={12}
+          height={16}
           borderRadius={6}
           key={`${keyPrefix}-price`}
           style={{ backgroundColor: 'rgba(254,203,77,0.35)' }}
+          pulse={true}
+        />
+        <SkeletonBox
+          width={QUICK_ADD_SIZE}
+          height={QUICK_ADD_SIZE}
+          borderRadius={QUICK_ADD_SIZE / 2}
+          key={`${keyPrefix}-quick-add`}
+          style={{ backgroundColor: 'rgba(254, 203, 77, 0.25)' }}
           pulse={true}
         />
       </View>
@@ -149,9 +150,10 @@ const styles = StyleSheet.create({
     borderRadius: CARD_BORDER_RADIUS,
     borderWidth: CARD_BORDER_WIDTH,
     borderColor: CARD_BORDER_COLOR,
-    paddingVertical: CARD_PADDING,
-    paddingHorizontal: CARD_PADDING,
-    minHeight: CARD_MIN_HEIGHT,
+    paddingTop: CARD_PADDING_TOP,
+    paddingBottom: CARD_PADDING_BOTTOM,
+    paddingHorizontal: CARD_PADDING_HORIZONTAL,
+    height: CARD_HEIGHT,
     alignItems: 'center',
     justifyContent: 'flex-start',
   },
@@ -177,8 +179,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.20)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 4,
-    marginBottom: 4,
+    marginTop: 8,
+    marginBottom: 10,
     overflow: 'hidden',
   },
 
@@ -187,5 +189,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginTop: 2,
   },
 });

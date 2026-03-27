@@ -42,6 +42,7 @@ import * as Location from 'expo-location';
 import { getToken } from '../../storagetank';
 import { addToWishlist, getWishlist } from '../../api/wishlist';
 import { getOrderModes } from '../../api/orderModes';
+import { useCart } from '../../contexts/CartContext';
 
 const BG_DARK = '#0B1D1B';
 const CARD_BG = '#152C29';
@@ -165,6 +166,36 @@ function formatPrice(price: string): string {
   return p.startsWith('$') ? p : `$${p}`;
 }
 
+function parseOptionalNumber(value: unknown): number | null {
+  if (value == null) return null;
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function formatReviewCountCompact(count: number): string {
+  if (count >= 1000) return `${Math.round(count / 1000)}K+`;
+  return String(Math.max(0, Math.round(count)));
+}
+
+function getDisplayRating(item: DiscoverMenuItem): string {
+  const ratingValue = parseOptionalNumber(item.ratingValue);
+  const reviewsCount = parseOptionalNumber(item.reviewsCount);
+
+  if (ratingValue != null && ratingValue > 0) {
+    const ratingText = ratingValue.toFixed(1);
+    if (reviewsCount != null && reviewsCount > 0) {
+      return `${ratingText} (${formatReviewCountCompact(reviewsCount)})`;
+    }
+    return ratingText;
+  }
+
+  const fallback = (item.rating ?? '').toString().trim();
+  if (fallback) return fallback;
+
+  // Until ratings API is fully integrated, keep static UX fallback.
+  return '4.9 (10K+)';
+}
+
 /** Raw addon from items API (linked to menu item). */
 type DiscoverAddonRaw = { id: string; name?: string; price?: string; [key: string]: unknown };
 
@@ -174,6 +205,8 @@ export interface DiscoverMenuItem {
   description: string;
   price: string;
   rating?: string;
+  ratingValue?: number | null;
+  reviewsCount?: number | null;
   /** Only API image URL; null = no image → show skeleton */
   image: { uri: string } | null;
   /** Cooking time from API (e.g. "10-15 mins") */
@@ -194,7 +227,25 @@ function mapApiItemToDiscover(item: ApiMenuItem & { addons?: unknown[]; cookingT
     ? (item.addons as DiscoverAddonRaw[])
     : undefined;
   const cookingTime = item.cookingTime != null && String(item.cookingTime).trim() !== '' ? String(item.cookingTime).trim() : undefined;
-  const ratingRaw = (item as unknown as Record<string, unknown>).rating;
+  const ratingSource = item as unknown as Record<string, unknown>;
+  const ratingRaw = ratingSource.rating;
+  const ratingValue =
+    parseOptionalNumber(ratingSource.ratingValue) ??
+    parseOptionalNumber(ratingSource.rating_value) ??
+    parseOptionalNumber(ratingSource.avgRating) ??
+    parseOptionalNumber(ratingSource.avg_rating) ??
+    parseOptionalNumber(ratingSource.averageRating) ??
+    parseOptionalNumber(ratingSource.average_rating) ??
+    parseOptionalNumber(ratingRaw);
+  const reviewsCount =
+    parseOptionalNumber(ratingSource.reviewsCount) ??
+    parseOptionalNumber(ratingSource.reviews_count) ??
+    parseOptionalNumber(ratingSource.reviewCount) ??
+    parseOptionalNumber(ratingSource.review_count) ??
+    parseOptionalNumber(ratingSource.totalReviews) ??
+    parseOptionalNumber(ratingSource.total_reviews) ??
+    parseOptionalNumber(ratingSource.ratingsCount) ??
+    parseOptionalNumber(ratingSource.ratings_count);
   const rating = ratingRaw != null ? String(ratingRaw) : undefined;
   return {
     id: item.id,
@@ -202,6 +253,8 @@ function mapApiItemToDiscover(item: ApiMenuItem & { addons?: unknown[]; cookingT
     description: item.description ?? 'Delicious Mexican-style dish.',
     price: item.price,
     rating,
+    ratingValue,
+    reviewsCount,
     image,
     cookingTime,
     addons,
@@ -243,6 +296,7 @@ function buildMenuSections(
 
 export default function DiscoverScreen() {
   const insets = useSafeAreaInsets();
+  const { addItem, itemCount } = useCart();
   const [searchQuery, setSearchQuery] = useState('');
   const [fullAddress, setFullAddress] = useState('');
   const [orderMode, setOrderMode] = useState<OrderMode>('delivery');
@@ -405,60 +459,19 @@ export default function DiscoverScreen() {
     navigation.getParent()?.navigate('ItemDetail', { item });
   };
 
-  const handleAddToWishlist = useCallback(
-    async (item: DiscoverMenuItem) => {
-      const idStr = String(item.id);
-      const productIdNum = Number(item.id);
-      if (!Number.isFinite(productIdNum)) {
-        showToast('Invalid product id', 'error');
-        return;
-      }
-
-      if (wishlistIds.has(idStr)) {
-        showToast('Already in wishlist', 'error');
-        return;
-      }
-
-      const token = await getToken();
-      if (!token) {
-        showToast('Please login to use wishlist', 'error');
-        navigateToLoginRegister();
-        return;
-      }
-
-      if (wishlistUpdatingIds.has(idStr)) return;
-
-      setWishlistUpdatingIds((prev) => {
-        const next = new Set(prev);
-        next.add(idStr);
-        return next;
+  const handleQuickAdd = useCallback(
+    (item: DiscoverMenuItem) => {
+      addItem({
+        productId: String(item.id),
+        name: item.name,
+        price: item.price,
+        image: item.image,
+        addons: [],
+        quantity: 1,
       });
-
-      try {
-        await addToWishlist(productIdNum);
-        setWishlistIds((prev) => {
-          const next = new Set(prev);
-          next.add(idStr);
-          return next;
-        });
-        showToast('Added to wishlist', 'success');
-      } catch (e) {
-        const msg = getNetworkErrorMessage(e);
-        if (/already|exists|duplicate/i.test(msg)) {
-          showToast('Already in wishlist', 'error');
-        } else {
-          showToast(msg, 'error');
-        }
-        await loadWishlist();
-      } finally {
-        setWishlistUpdatingIds((prev) => {
-          const next = new Set(prev);
-          next.delete(idStr);
-          return next;
-        });
-      }
+      showToast('Added to cart', 'success');
     },
-    [getNetworkErrorMessage, loadWishlist, showToast, wishlistUpdatingIds, wishlistIds]
+    [addItem, showToast]
   );
   const mainListRef = useRef<SectionList<DiscoverGridRow>>(null);
   const tabsScrollRef = useRef<ScrollView>(null);
@@ -1083,6 +1096,13 @@ export default function DiscoverScreen() {
 
           <Pressable style={styles.headerIconBtn} onPress={navigateToCart} hitSlop={8}>
             <Ionicons name="cart-outline" size={17} color={BG_DARK} />
+            {itemCount > 0 ? (
+              <View style={styles.headerBadge}>
+                <Text style={styles.headerBadgeText}>
+                  {itemCount > 99 ? '99+' : String(itemCount)}
+                </Text>
+              </View>
+            ) : null}
           </Pressable>
         </View>
       </View>
@@ -1290,7 +1310,7 @@ export default function DiscoverScreen() {
                     <View style={styles.productGridTopLeftRow}>
                       <MaterialIcons name="star" size={18} color={GOLD} />
                       <Text style={styles.productGridRating} numberOfLines={1}>
-                        {left.rating ?? '4.9 (10K+)'}
+                        {getDisplayRating(left)}
                       </Text>
                     </View>
                   </View>
@@ -1311,20 +1331,18 @@ export default function DiscoverScreen() {
 
                   <View style={styles.productGridBottomRow}>
                     <Text style={styles.productGridPrice}>{formatPrice(left.price)}</Text>
+                    <Pressable
+                      style={styles.productGridAddBtn}
+                      onPress={(e) => {
+                        e.stopPropagation?.();
+                        handleQuickAdd(left);
+                      }}
+                      hitSlop={8}
+                      accessibilityLabel="Quick add to cart"
+                    >
+                      <MaterialIcons name="add" size={14} color={BG_DARK} />
+                    </Pressable>
                   </View>
-
-                  <Pressable
-                    style={styles.productGridAddBtn}
-                    onPress={(e) => {
-                      e.stopPropagation?.();
-                      void handleAddToWishlist(left);
-                    }}
-                    hitSlop={8}
-                    disabled={wishlistUpdatingIds.has(String(left.id))}
-                    accessibilityLabel="Add to wishlist"
-                  >
-                    <MaterialIcons name="add" size={16} color={BG_DARK} />
-                  </Pressable>
                 </Pressable>
               ) : null}
 
@@ -1337,7 +1355,7 @@ export default function DiscoverScreen() {
                     <View style={styles.productGridTopLeftRow}>
                       <MaterialIcons name="star" size={18} color={GOLD} />
                       <Text style={styles.productGridRating} numberOfLines={1}>
-                        {right.rating ?? '4.9 (10K+)'}
+                        {getDisplayRating(right)}
                       </Text>
                     </View>
                   </View>
@@ -1358,20 +1376,18 @@ export default function DiscoverScreen() {
 
                   <View style={styles.productGridBottomRow}>
                     <Text style={styles.productGridPrice}>{formatPrice(right.price)}</Text>
+                    <Pressable
+                      style={styles.productGridAddBtn}
+                      onPress={(e) => {
+                        e.stopPropagation?.();
+                        handleQuickAdd(right);
+                      }}
+                      hitSlop={8}
+                      accessibilityLabel="Quick add to cart"
+                    >
+                      <MaterialIcons name="add" size={14} color={BG_DARK} />
+                    </Pressable>
                   </View>
-
-                  <Pressable
-                    style={styles.productGridAddBtn}
-                    onPress={(e) => {
-                      e.stopPropagation?.();
-                      void handleAddToWishlist(right);
-                    }}
-                    hitSlop={8}
-                    disabled={wishlistUpdatingIds.has(String(right.id))}
-                    accessibilityLabel="Add to wishlist"
-                  >
-                    <MaterialIcons name="add" size={16} color={BG_DARK} />
-                  </Pressable>
                 </Pressable>
               ) : null}
             </View>
@@ -1920,9 +1936,10 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(229,185,72,0.3)',
-    paddingVertical: 12,
+    paddingTop: 12,
+    paddingBottom: 14,
     paddingHorizontal: 12,
-    minHeight: 155,
+    height: 248,
     alignItems: 'center',
     justifyContent: 'flex-start',
   },
@@ -1944,16 +1961,16 @@ const styles = StyleSheet.create({
     opacity: 0.85,
   },
   productGridImageCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 126,
+    height: 126,
+    borderRadius: 63,
     backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 2,
     borderColor: 'rgba(255,255,255,0.20)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 4,
-    marginBottom: 4,
+    marginTop: 8,
+    marginBottom: 10,
     overflow: 'hidden',
   },
   productGridImageCircleImg: {
@@ -1971,35 +1988,32 @@ const styles = StyleSheet.create({
     width: '100%',
     textAlign: 'left',
     fontFamily: 'Montserrat_700Bold',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '700',
     color: TEXT_WHITE,
-    marginBottom: 2,
+    marginBottom: 6,
   },
   productGridBottomRow: {
     width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginTop: 2,
   },
   productGridPrice: {
     fontFamily: 'Montserrat_700Bold',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '700',
     color: GOLD,
+    lineHeight: 18,
   },
   productGridAddBtn: {
-    position: 'absolute',
-    right: 10,
-    bottom: 10,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: GOLD,
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 20,
-    elevation: 8,
   },
   menuRowText: {
     flex: 1,

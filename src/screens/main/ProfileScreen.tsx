@@ -34,7 +34,6 @@ export default function ProfileScreen() {
 
   const [currentUser, setCurrentUser] = useState<ProfileUser | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
-  const hasRedirectedToLoginRef = useRef(false);
 
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const toastOpacity = useRef(new Animated.Value(0)).current;
@@ -65,15 +64,6 @@ export default function ProfileScreen() {
       void loadCurrentUser();
     }, [])
   );
-
-  // If user is logged out, redirect to login screen.
-  useEffect(() => {
-    if (loadingUser) return;
-    if (currentUser) return;
-    if (hasRedirectedToLoginRef.current) return;
-    hasRedirectedToLoginRef.current = true;
-    navigateToLoginRegister();
-  }, [loadingUser, currentUser]);
 
   const handleLogout = async () => {
     await unregisterFromPushNotifications();
@@ -108,59 +98,40 @@ export default function ProfileScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header card – guest vs logged-in user */}
-        <View style={styles.headerCard}>
-          <View style={styles.headerLeftRow}>
-            {currentUser && (
-              <View style={styles.avatarCircle}>
-                <Text style={styles.avatarInitials}>
-                  {(currentUser.name || currentUser.email || 'C')
+        {/* Profile hero */}
+        {currentUser ? (
+          <View style={styles.profileHero}>
+            <View style={styles.avatarWrapLarge}>
+              <View style={styles.avatarCircleLarge}>
+                <Text style={styles.avatarInitialsLarge}>
+                  {(currentUser?.name || currentUser?.email || 'C')
                     .trim()
                     .charAt(0)
                     .toUpperCase()}
                 </Text>
               </View>
-            )}
-            <View style={styles.headerTextWrap}>
-              {currentUser ? (
-                <>
-                  <Text style={styles.headerTitle}>
-                    {currentUser.name && currentUser.name.trim() !== ''
-                      ? currentUser.name
-                      : 'Customer'}
-                  </Text>
-                  <Text style={styles.headerSubtitle}>{currentUser.email}</Text>
-                  {currentUser.phone ? (
-                    <Text style={styles.headerSubtitle}>{currentUser.phone}</Text>
-                  ) : null}
-                </>
-              ) : (
-                <>
-                  <Text style={styles.headerTitle}>Hi, guest!</Text>
-                  <Text style={styles.headerSubtitle}>Log in to make an order</Text>
-                </>
-              )}
             </View>
+            <Text style={styles.heroName}>
+              {currentUser.name && currentUser.name.trim() !== '' ? currentUser.name : 'Customer'}
+            </Text>
+            <Text style={styles.heroEmail}>{currentUser.email}</Text>
           </View>
-          <View style={styles.headerRight}>
-            {currentUser ? (
-              <Pressable
-                style={styles.logoutButton}
-                onPress={handleLogout}
-                hitSlop={8}
-              >
-                <Ionicons name="log-out-outline" size={20} color={GOLD} />
-              </Pressable>
-            ) : (
-              <Pressable
-                style={styles.signInButton}
-                onPress={navigateToLoginRegister}
-              >
+        ) : (
+          <View style={styles.guestHeroCard}>
+            <View style={styles.guestHeroRow}>
+              <View style={styles.avatarCircleLarge}>
+                <Text style={styles.avatarInitialsLarge}>C</Text>
+              </View>
+              <View style={styles.guestHeroTextWrap}>
+                <Text style={styles.heroName}>Hi, guest!</Text>
+                <Text style={styles.heroEmail}>Log in to make an order</Text>
+              </View>
+              <Pressable style={styles.signInHeroButton} onPress={navigateToLoginRegister}>
                 <Text style={styles.signInText}>Sign In</Text>
               </Pressable>
-            )}
+            </View>
           </View>
-        </View>
+        )}
 
         {/* Settings list (only when logged in) */}
         {currentUser ? (
@@ -170,9 +141,14 @@ export default function ProfileScreen() {
               style={styles.listItem}
               onPress={() => navigation.getParent()?.navigate('Orders')}
             >
-              <View>
+              <View style={styles.listItemLeft}>
+                <View style={styles.listItemIconWrap}>
+                  <Ionicons name="receipt-outline" size={18} color={GOLD} />
+                </View>
+                <View>
                 <Text style={styles.listLabel}>My Orders</Text>
                 <Text style={styles.listSubLabel}>View your order history</Text>
+                </View>
               </View>
               <Ionicons name="chevron-forward" size={18} color={MUTED_TEXT} />
             </Pressable>
@@ -183,9 +159,14 @@ export default function ProfileScreen() {
               style={styles.listItem}
               onPress={() => navigation.getParent()?.navigate('Address')}
             >
-              <View>
+              <View style={styles.listItemLeft}>
+                <View style={styles.listItemIconWrap}>
+                  <Ionicons name="location-outline" size={18} color={GOLD} />
+                </View>
+                <View>
                 <Text style={styles.listLabel}>My Addresses</Text>
                 <Text style={styles.listSubLabel}>Saved delivery locations</Text>
+                </View>
               </View>
               <Ionicons name="chevron-forward" size={18} color={MUTED_TEXT} />
             </Pressable>
@@ -196,9 +177,14 @@ export default function ProfileScreen() {
               style={styles.listItem}
               onPress={() => navigation.getParent()?.navigate('Wishlist')}
             >
-              <View>
+              <View style={styles.listItemLeft}>
+                <View style={styles.listItemIconWrap}>
+                  <Ionicons name="heart-outline" size={18} color={GOLD} />
+                </View>
+                <View>
                 <Text style={styles.listLabel}>Wishlist</Text>
                 <Text style={styles.listSubLabel}>Your favorite items</Text>
+                </View>
               </View>
               <Ionicons name="chevron-forward" size={18} color={MUTED_TEXT} />
             </Pressable>
@@ -216,6 +202,11 @@ export default function ProfileScreen() {
               <Text style={styles.deleteAccountText}>Delete account</Text>
             </Pressable>
           </View>
+
+          <Pressable style={styles.logoutLargeButton} onPress={handleLogout}>
+            <Ionicons name="log-out-outline" size={19} color="#FFB7B7" />
+            <Text style={styles.logoutLargeText}>Log Out</Text>
+          </Pressable>
           </>
         ) : null}
       </ScrollView>
@@ -331,8 +322,59 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: HORIZONTAL_PADDING,
-    paddingTop: 24,
+    paddingTop: 18,
     paddingBottom: 32,
+  },
+  profileHero: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  guestHeroCard: {
+    backgroundColor: CARD_BG,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(229,185,72,0.25)',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    marginBottom: 16,
+  },
+  guestHeroRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  guestHeroTextWrap: {
+    marginLeft: 12,
+    flex: 1,
+    minWidth: 0,
+  },
+  avatarWrapLarge: {
+    position: 'relative',
+    marginBottom: 10,
+  },
+  avatarCircleLarge: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#1F403C',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(229,185,72,0.65)',
+  },
+  avatarInitialsLarge: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: GOLD,
+  },
+  heroName: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: TEXT_WHITE,
+    marginBottom: 2,
+  },
+  heroEmail: {
+    fontSize: 11,
+    color: MUTED_TEXT,
   },
   headerCard: {
     backgroundColor: CARD_BG,
@@ -400,13 +442,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   signInText: {
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '700',
     color: BG_DARK,
   },
   listCard: {
     backgroundColor: CARD_BG,
-    borderRadius: 18,
+    borderRadius: 22,
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderWidth: 1,
@@ -417,6 +459,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 14,
+  },
+  listItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    minWidth: 0,
+  },
+  listItemIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
   },
   listLabel: {
     fontSize: 14,
@@ -451,6 +508,30 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#FF8080',
+  },
+  logoutLargeButton: {
+    marginTop: 16,
+    backgroundColor: '#071312',
+    borderRadius: 18,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 128, 128, 0.18)',
+  },
+  logoutLargeText: {
+    fontSize: 30 / 2,
+    fontWeight: '800',
+    color: '#FFB7B7',
+  },
+  signInHeroButton: {
+    backgroundColor: GOLD,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginLeft: 10,
   },
   deleteModalBackdrop: {
     flex: 1,

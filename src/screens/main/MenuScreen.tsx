@@ -19,6 +19,7 @@ import { MenuScreenSkeleton } from '../../components/skeleton/MenuScreenSkeleton
 import { addToWishlist } from '../../api/wishlist';
 import { getToken } from '../../storagetank';
 import { navigateToLoginRegister } from '../../navigation/rootNavigationRef';
+import { useCart } from '../../contexts/CartContext';
 
 type Nav = { navigate: (name: string) => void; getParent: () => { navigate: (name: string, params: object) => void } | null };
 
@@ -63,15 +64,17 @@ function normalizeSearchText(value: string): string {
 interface ProductCardProps {
   item: MenuProduct;
   onPress: (item: MenuProduct) => void;
-  onAddToWishlist: (item: MenuProduct) => void;
-  isUpdating: boolean;
+  onWishlistPress: (item: MenuProduct) => void;
+  onQuickAdd: (item: MenuProduct) => void;
+  wishlistUpdating: boolean;
 }
 
 const ProductCard = memo(function ProductCard({
   item,
   onPress,
-  onAddToWishlist,
-  isUpdating,
+  onWishlistPress,
+  onQuickAdd,
+  wishlistUpdating,
 }: ProductCardProps) {
   return (
     <Pressable
@@ -79,14 +82,26 @@ const ProductCard = memo(function ProductCard({
       onPress={() => onPress(item)}
     >
       <Pressable
-        style={styles.addBtn}
+        style={styles.wishBtn}
         onPress={(e) => {
           e.stopPropagation();
-          onAddToWishlist(item);
+          onWishlistPress(item);
         }}
         hitSlop={8}
         accessibilityLabel="Add to wishlist"
-        disabled={isUpdating}
+        disabled={wishlistUpdating}
+      >
+        <Ionicons name="heart-outline" size={17} color={BG_DARK} />
+      </Pressable>
+
+      <Pressable
+        style={styles.addBtn}
+        onPress={(e) => {
+          e.stopPropagation();
+          onQuickAdd(item);
+        }}
+        hitSlop={8}
+        accessibilityLabel="Quick add to cart"
       >
         <MaterialIcons name="add" size={16} color={BG_DARK} />
       </Pressable>
@@ -164,6 +179,7 @@ function mapApiItemToMenuProduct(item: ApiMenuItem & { addons?: unknown[] }): Me
 
 export default function MenuScreen() {
   const insets = useSafeAreaInsets();
+  const { addItem } = useCart();
   const [searchQuery, setSearchQuery] = useState('');
   const [menuProducts, setMenuProducts] = useState<MenuProduct[]>([]);
   const [loading, setLoading] = useState(true);
@@ -235,6 +251,21 @@ export default function MenuScreen() {
     [showToast]
   );
 
+  const handleQuickAddToCart = useCallback(
+    (item: MenuProduct) => {
+      addItem({
+        productId: String(item.id),
+        name: item.name,
+        price: item.price,
+        image: item.image,
+        addons: [],
+        quantity: 1,
+      });
+      showToast('Added to cart', 'success');
+    },
+    [addItem, showToast]
+  );
+
   useEffect(() => {
     const cached = getCachedMenuItems();
     if (cached && cached.length > 0) {
@@ -279,12 +310,13 @@ export default function MenuScreen() {
         <ProductCard
           item={item}
           onPress={handleItemPress}
-          onAddToWishlist={handleAddToWishlist}
-          isUpdating={isUpdating}
+          onWishlistPress={handleAddToWishlist}
+          onQuickAdd={handleQuickAddToCart}
+          wishlistUpdating={isUpdating}
         />
       );
     },
-    [handleAddToWishlist, handleItemPress, updatingIds]
+    [handleAddToWishlist, handleItemPress, handleQuickAddToCart, updatingIds]
   );
 
   const keyExtractor = useCallback((item: MenuProduct) => item.id, []);
@@ -434,6 +466,19 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderRadius: 15,
+    backgroundColor: GOLD,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 20,
+    elevation: 8,
+  },
+  wishBtn: {
+    position: 'absolute',
+    right: 12,
+    top: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: GOLD,
     alignItems: 'center',
     justifyContent: 'center',
