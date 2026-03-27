@@ -37,13 +37,6 @@ function getLineTotal(item: CartItem): number {
   return main + addonsSum;
 }
 
-function getAddonsSubtitle(item: CartItem): string {
-  const addons = Array.isArray(item.addons) ? item.addons : [];
-  if (addons.length === 0) return '';
-  const names = addons.map((a) => (a.name && String(a.name).trim()) || a.id || '').filter(Boolean);
-  return names.length > 0 ? `Add-ons: ${names.join(', ')}` : '';
-}
-
 export default function CartScreen() {
   const navigation = useNavigation<any>();
   const { items, removeItem, updateQuantity, total } = useCart();
@@ -81,7 +74,8 @@ export default function CartScreen() {
           </View>
         ) : (
           items.map((cartItem) => (
-            <View key={cartItem.id} style={styles.cartCard}>
+            <View key={cartItem.id} style={styles.cartGroupCard}>
+            <View style={styles.cartCard}>
               <View style={styles.cartCardImageWrap}>
                 {cartItem.image ? (
                   <Image
@@ -99,11 +93,6 @@ export default function CartScreen() {
                 <Text style={styles.cartCardName} numberOfLines={1}>
                   {cartItem.name}
                 </Text>
-                {getAddonsSubtitle(cartItem) ? (
-                  <Text style={styles.cartCardAddons} numberOfLines={2}>
-                    {getAddonsSubtitle(cartItem)}
-                  </Text>
-                ) : null}
                 <Text style={styles.cartCardPrice}>
                   {formatPrice(String(getLineTotal(cartItem).toFixed(2)))}
                 </Text>
@@ -134,6 +123,34 @@ export default function CartScreen() {
                   </Pressable>
                 </View>
               </View>
+            </View>
+            {Array.isArray(cartItem.addons) &&
+              cartItem.addons.map((addon) => (
+                <View key={`${cartItem.id}-${addon.id}`} style={styles.addonItemCard}>
+                  <View style={styles.addonItemIconWrap}>
+                    {addon.image ? (
+                      <Image
+                        source={typeof addon.image === 'string' ? { uri: addon.image } : addon.image}
+                        style={styles.addonItemImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <MaterialIcons name="image-not-supported" size={18} color="rgba(255,255,255,0.45)" />
+                    )}
+                  </View>
+                  <View style={styles.addonItemBody}>
+                    <Text style={styles.addonItemName} numberOfLines={1}>
+                      {addon.name}
+                    </Text>
+                    <View style={styles.addonItemMetaRow}>
+                      <Text style={styles.addonItemPrice}>
+                        {formatPrice(String((parsePrice(addon.price) * cartItem.quantity).toFixed(2)))}
+                      </Text>
+                      <Text style={styles.addonItemQty}>×{cartItem.quantity}</Text>
+                    </View>
+                  </View>
+                </View>
+              ))}
             </View>
           ))
         )}
@@ -215,15 +232,20 @@ const styles = StyleSheet.create({
   },
   cartCard: {
     flexDirection: 'row',
+    backgroundColor: 'transparent',
+    borderRadius: 0,
+    padding: 12,
+    alignItems: 'center',
+  },
+  cartGroupCard: {
     backgroundColor: CARD_BG,
     borderRadius: 16,
-    padding: 12,
     marginBottom: 12,
     borderWidth: 1,
     borderColor: 'rgba(229,185,72,0.3)',
     borderLeftWidth: 3,
     borderLeftColor: GOLD,
-    alignItems: 'center',
+    overflow: 'hidden',
   },
   cartCardImageWrap: {
     width: 80,
@@ -250,13 +272,56 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: TEXT_WHITE,
-    marginBottom: 2,
-  },
-  cartCardAddons: {
-    fontSize: 12,
-    fontWeight: '400',
-    color: MUTED_TEXT,
     marginBottom: 4,
+  },
+  addonItemCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(254,203,77,0.18)',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 0,
+    width: '100%',
+  },
+  addonItemIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: 'rgba(254,203,77,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    overflow: 'hidden',
+  },
+  addonItemImage: {
+    width: '100%',
+    height: '100%',
+  },
+  addonItemBody: {
+    flex: 1,
+  },
+  addonItemName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: TEXT_WHITE,
+    marginBottom: 4,
+  },
+  addonItemMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  addonItemPrice: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: GOLD,
+  },
+  addonItemQty: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: MUTED_TEXT,
   },
   cartCardPrice: {
     fontSize: 14,

@@ -417,7 +417,12 @@ export default function ItemDetailScreen() {
             setAddingToCart(true);
             const selectedAddonsList = addons
               .filter((a) => selectedAddonIds.has(a.id))
-              .map((a) => ({ id: a.id, name: String(a.name ?? '').trim() || a.id, price: String(a.price ?? '') }));
+              .map((a) => ({
+                id: a.id,
+                name: String(a.name ?? '').trim() || a.id,
+                price: String(a.price ?? ''),
+                image: a.image ?? null,
+              }));
             addItem({
               productId: item.id,
               name: item.name,

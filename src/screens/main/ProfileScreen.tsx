@@ -205,19 +205,6 @@ export default function ProfileScreen() {
 
             <View style={styles.listDivider} />
 
-            <Pressable
-              style={styles.listItem}
-              onPress={() => navigation.getParent()?.navigate('Reviews')}
-            >
-              <View>
-                <Text style={styles.listLabel}>Reviews</Text>
-                <Text style={styles.listSubLabel}>See and share feedback</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={MUTED_TEXT} />
-            </Pressable>
-
-            <View style={styles.listDivider} />
-
           </View>
 
           <View style={styles.deleteAccountSection}>

@@ -63,7 +63,12 @@ export default function OrdersScreen() {
         showToast('Order placed successfully', 'success');
         navigation.setParams({ showOrderSuccessToast: false });
       }
-    }, [route.params?.showOrderSuccessToast, navigation])
+      const initialTab = route.params?.initialTab as OrderTab | undefined;
+      if (initialTab === 'all' || initialTab === 'current' || initialTab === 'history') {
+        setActiveTab(initialTab);
+        navigation.setParams({ initialTab: undefined });
+      }
+    }, [route.params?.showOrderSuccessToast, route.params?.initialTab, navigation])
   );
 
   useFocusEffect(
@@ -220,10 +225,9 @@ export default function OrdersScreen() {
   );
 
   const renderOrderCard = (order: Order) => (
-    <Pressable
+    <View
       key={order.id}
       style={styles.orderCard}
-      onPress={() => navigation.navigate('ViewOrderDetails', { orderId: order.id })}
     >
       <View style={styles.orderHeader}>
         <Text style={styles.orderNumber}>Order {order.id}</Text>
@@ -253,10 +257,19 @@ export default function OrdersScreen() {
         </View>
       )}
       <View style={styles.orderFooter}>
-        <Text style={styles.orderDate}>{order.date || formatDate(order.createdAt)}</Text>
-        <Text style={styles.orderTotal}>{order.amount}</Text>
+        <View style={styles.orderFooterLeft}>
+          <Text style={styles.orderDate}>{order.date || formatDate(order.createdAt)}</Text>
+          <Text style={styles.orderTotal}>{order.amount}</Text>
+        </View>
+        <Pressable
+          style={styles.orderDetailsBtn}
+          onPress={() => navigation.navigate('ViewOrderDetails', { orderId: order.id })}
+        >
+          <Text style={styles.orderDetailsBtnText}>Details</Text>
+          <Ionicons name="chevron-forward" size={14} color={GOLD} />
+        </Pressable>
       </View>
-    </Pressable>
+    </View>
   );
 
   return (
@@ -520,14 +533,37 @@ const styles = StyleSheet.create({
     borderTopColor: 'rgba(255,255,255,0.1)',
     paddingTop: 12,
   },
+  orderFooterLeft: {
+    flex: 1,
+    minWidth: 0,
+    marginRight: 10,
+  },
   orderDate: {
     fontSize: 12,
     color: MUTED_TEXT,
+    marginBottom: 4,
   },
   orderTotal: {
     fontSize: 15,
     fontWeight: '700',
     color: GOLD,
+  },
+  orderDetailsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(254,203,77,0.42)',
+    backgroundColor: 'rgba(254,203,77,0.12)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  orderDetailsBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: GOLD,
+    letterSpacing: 0.2,
   },
   toast: {
     position: 'absolute',

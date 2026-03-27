@@ -1,21 +1,15 @@
-import React, { useCallback, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   Pressable,
-  TextInput,
-  KeyboardAvoidingView,
-  Platform,
-  Alert,
-  ActivityIndicator,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
-import { submitReview } from '../../api/review';
-import { getNetworkErrorMessage } from '../../api/apiConfig';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 
 const BG = '#0B1D1B';
 const CARD = '#152C29';
@@ -25,38 +19,50 @@ const TEXT = '#FFFFFF';
 const MUTED = 'rgba(255,255,255,0.65)';
 const H_PAD = 20;
 
-const FEEDBACK_TAGS = [
-  'Still Hot',
-  'Friendly Driver',
-  'Extra Salsa',
-  'Perfect Spices',
-  'Generous Portions',
-] as const;
-
 type RouteParams = {
   orderId: string;
   items: string;
   amount: string;
+  orderType?: string;
 };
 
-function StarRow({
+type ReviewMode = 'delivery' | 'dining' | 'takeaway';
+
+function getReviewMode(orderType?: string): ReviewMode {
+  const t = String(orderType ?? '').trim().toLowerCase();
+  if (t.includes('deliver')) return 'delivery';
+  if (t.includes('dine')) return 'dining';
+  return 'takeaway';
+}
+
+function modeExperienceLabels(mode: ReviewMode): [string, string, string] {
+  if (mode === 'delivery') return ['Food Quality', 'Delivery Speed', 'Packaging'];
+  if (mode === 'dining') return ['Food Quality', 'Staff Service', 'Ambience'];
+  return ['Food Quality', 'Pickup Speed', 'Packaging'];
+}
+
+function modeTags(mode: ReviewMode): string[] {
+  if (mode === 'delivery') return ['Perfect Spice', 'Flavorful', 'Portion Size'];
+  if (mode === 'dining') return ['Great Service', 'Fresh', 'Portion Size'];
+  return ['Ready on Time', 'Well Packed', 'Flavorful'];
+}
+
+function StarPicker({
   value,
   onChange,
-  size,
+  size = 24,
   gap = 6,
-  align = 'end',
 }: {
   value: number;
   onChange: (n: number) => void;
-  size: number;
+  size?: number;
   gap?: number;
-  align?: 'center' | 'end';
 }) {
   return (
-    <View style={[starStyles.row, { gap }, align === 'center' && starStyles.rowCenter]}>
+    <View style={[starStyles.row, { gap }]}>
       {[1, 2, 3, 4, 5].map((i) => (
-        <Pressable key={i} onPress={() => onChange(i)} hitSlop={4}>
-          <Ionicons name={i <= value ? 'star' : 'star-outline'} size={size} color={GOLD} />
+        <Pressable key={i} onPress={() => onChange(i)} hitSlop={6}>
+          <Ionicons name="star" size={size} color={i <= value ? GOLD : 'rgba(255,255,255,0.18)'} />
         </Pressable>
       ))}
     </View>
@@ -67,99 +73,40 @@ const starStyles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
-  },
-  rowCenter: {
-    justifyContent: 'center',
   },
 });
 
 export default function RateYourFeastScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const { orderId, items, amount } = (route.params || {}) as RouteParams;
+  const { items, orderType } = (route.params || {}) as RouteParams;
+  const mode = useMemo(() => getReviewMode(orderType), [orderType]);
+  const labels = useMemo(() => modeExperienceLabels(mode), [mode]);
+  const tags = useMemo(() => modeTags(mode), [mode]);
 
-  const [overall, setOverall] = useState(0);
-  const [foodQuality, setFoodQuality] = useState(0);
-  const [servicesRates, setServicesRates] = useState(0);
-  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
-  const [comment, setComment] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const [dishRating, setDishRating] = useState(0);
+  const [tagSelected, setTagSelected] = useState<string | null>(null);
+  const [experienceRatings, setExperienceRatings] = useState<Record<string, number>>({
+    a: 0,
+    b: 0,
+    c: 0,
+  });
 
-  const toggleTag = useCallback((tag: string) => {
-    setSelectedTags((prev) => {
-      const next = new Set(prev);
-      if (next.has(tag)) next.delete(tag);
-      else next.add(tag);
-      return next;
-    });
-  }, []);
+  useEffect(() => {
+    setExperienceRatings({ a: 0, b: 0, c: 0 });
+    setTagSelected(null);
+    setDishRating(0);
+  }, [mode]);
 
-  const onPickPhotos = () => {
-    Alert.alert(
-      'Photos',
-      'Photo upload from your library will be available in a future update. For now, you can submit your star ratings and written feedback.',
-      [{ text: 'OK' }]
-    );
-  };
-
-  const onSubmit = async () => {
-    if (overall < 1) {
-      Alert.alert('Rating needed', 'Please rate your overall experience with the stars above.');
-      return;
-    }
-    if (foodQuality < 1 || servicesRates < 1) {
-      Alert.alert(
-        'Rate all categories',
-        'Please give a star rating for Food Quality and for Services — both are required to submit your review.'
-      );
-      return;
-    }
-    if (submitting) return;
-    if (!orderId || !String(orderId).trim()) {
-      Alert.alert('Missing order', 'Please open this screen from Reviews and select an order.');
-      return;
-    }
-    setSubmitting(true);
-    try {
-      await submitReview({
-        orderId: String(orderId).trim(),
-        overallRating: overall,
-        foodQualityRating: foodQuality >= 1 ? foodQuality : undefined,
-        servicesRating: servicesRates >= 1 ? servicesRates : undefined,
-        /** Only whitelisted tags — avoids backend errors if a bad value is ever in state. */
-        tags: FEEDBACK_TAGS.filter((t) => selectedTags.has(t)),
-        comment: comment.trim() || undefined,
-      });
-      Alert.alert('Thank you!', 'Your review has been submitted. We appreciate your feedback.', [
-        { text: 'OK', onPress: () => navigation.goBack() },
-      ]);
-    } catch (e) {
-      Alert.alert('Could not submit review', getNetworkErrorMessage(e));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const titleLine = items?.trim() || 'Your order';
+  const titleLine = items?.trim() || 'AI Pastor Tacos (3)';
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom', 'left', 'right']}>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
-      >
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           {/* Header */}
           <View style={styles.topBar}>
-            <Pressable style={styles.backBtn} onPress={() => navigation.goBack()} hitSlop={10}>
-              <Ionicons name="arrow-back" size={22} color={TEXT} />
+            <Pressable onPress={() => navigation.goBack()} hitSlop={10}>
+              <Ionicons name="arrow-back" size={24} color={TEXT} />
             </Pressable>
             <Text style={styles.screenTitle} numberOfLines={1}>
               Rate Your Feast
@@ -167,91 +114,67 @@ export default function RateYourFeastScreen() {
             <Text style={styles.brandMark}>MEXICANO</Text>
           </View>
 
-          {/* Order summary */}
-          <View style={styles.summaryCard}>
-            <View style={styles.thumb}>
-              <Ionicons name="fast-food" size={36} color={GOLD} />
+          <Text style={styles.sectionHeading}>How was the experience?</Text>
+          <View style={styles.experienceCard}>
+            <View style={styles.experienceRow}>
+              <Text style={styles.experienceLabel}>{labels[0]}</Text>
+              <StarPicker
+                value={experienceRatings.a}
+                onChange={(n) => setExperienceRatings((prev) => ({ ...prev, a: n }))}
+              />
             </View>
-            <View style={styles.summaryText}>
-              <Text style={styles.lastOrderLabel}>LAST ORDER</Text>
-              <Text style={styles.orderName} numberOfLines={3}>
-                {titleLine}
-              </Text>
-              <Text style={styles.price}>{amount || '—'}</Text>
+            <View style={styles.experienceRow}>
+              <Text style={styles.experienceLabel}>{labels[1]}</Text>
+              <StarPicker
+                value={experienceRatings.b}
+                onChange={(n) => setExperienceRatings((prev) => ({ ...prev, b: n }))}
+              />
             </View>
-          </View>
-
-          {/* Overall */}
-          <Text style={styles.sectionQuestion}>How was your meal?</Text>
-          <View style={styles.overallStars}>
-            <StarRow value={overall} onChange={setOverall} size={36} gap={10} align="center" />
-          </View>
-
-          {/* Detailed */}
-          <View style={styles.detailCard}>
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Food Quality</Text>
-              <StarRow value={foodQuality} onChange={setFoodQuality} size={18} gap={4} />
-            </View>
-            <View style={styles.detailDivider} />
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Services Rates</Text>
-              <StarRow value={servicesRates} onChange={setServicesRates} size={18} gap={4} />
+            <View style={styles.experienceRow}>
+              <Text style={styles.experienceLabel}>{labels[2]}</Text>
+              <StarPicker
+                value={experienceRatings.c}
+                onChange={(n) => setExperienceRatings((prev) => ({ ...prev, c: n }))}
+              />
             </View>
           </View>
 
-          {/* Tags */}
-          <Text style={styles.subheading}>What stood out?</Text>
-          <View style={styles.chipWrap}>
-            {FEEDBACK_TAGS.map((tag) => {
-              const on = selectedTags.has(tag);
-              return (
-                <Pressable
-                  key={tag}
-                  onPress={() => toggleTag(tag)}
-                  style={[styles.chip, on && styles.chipOn]}
-                >
-                  <Text style={[styles.chipText, on && styles.chipTextOn]}>{tag}</Text>
-                </Pressable>
-              );
-            })}
+          <View style={styles.rateDishHeader}>
+            <MaterialCommunityIcons name="silverware-fork-knife" size={20} color={GOLD} />
+            <Text style={styles.rateDishTitle}>Rate Your Dishes</Text>
           </View>
 
-          {/* Photos */}
-          <Text style={styles.subheading}>Add photos of your feast</Text>
-          <Pressable style={styles.photoBox} onPress={onPickPhotos}>
-            <Ionicons name="camera-outline" size={40} color={GOLD} />
-            <Text style={styles.photoHint}>Tap to upload photos</Text>
-          </Pressable>
+          <View style={styles.dishCard}>
+            <View style={styles.dishTopRow}>
+              <View style={styles.dishThumbWrap}>
+                <Image
+                  source={{ uri: 'https://placehold.co/80x80/png' }}
+                  style={styles.dishThumb}
+                  resizeMode="cover"
+                />
+              </View>
+              <View style={styles.dishContent}>
+                <Text style={styles.dishName} numberOfLines={1}>{titleLine}</Text>
+                <StarPicker value={dishRating} onChange={setDishRating} size={30} gap={7} />
+              </View>
+            </View>
 
-          {/* Comment */}
-          <Text style={styles.subheading}>Tell us more about your experience...</Text>
-          <TextInput
-            style={styles.textArea}
-            placeholder="The salsa was incredibly fresh and the meat was perfectly seasoned..."
-            placeholderTextColor={MUTED}
-            multiline
-            value={comment}
-            onChangeText={setComment}
-            textAlignVertical="top"
-          />
-
-          <Pressable
-            style={[styles.submitBtn, submitting && styles.submitBtnDisabled]}
-            onPress={() => void onSubmit()}
-            disabled={submitting}
-          >
-            {submitting ? (
-              <ActivityIndicator color={BG} />
-            ) : (
-              <>
-                <Text style={styles.submitText}>SUBMIT REVIEW</Text>
-                <Ionicons name="send" size={18} color={BG} />
-              </>
-            )}
-          </Pressable>
-        </ScrollView>
-      </KeyboardAvoidingView>
+            <View style={styles.tagRow}>
+              {tags.map((tag) => {
+                const active = tagSelected === tag;
+                return (
+                  <Pressable
+                    key={tag}
+                    onPress={() => setTagSelected(active ? null : tag)}
+                    style={[styles.tagChip, active && styles.tagChipActive]}
+                  >
+                    <Text style={[styles.tagText, active && styles.tagTextActive]}>{tag}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -261,200 +184,126 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: BG,
   },
-  flex: {
-    flex: 1,
-  },
   scroll: {
     flex: 1,
   },
   scrollContent: {
     paddingHorizontal: H_PAD,
-    paddingBottom: 40,
+    paddingTop: 8,
+    paddingBottom: 30,
   },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    marginBottom: 8,
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    marginBottom: 10,
   },
   screenTitle: {
     flex: 1,
-    marginLeft: 12,
-    fontSize: 17,
+    marginLeft: 14,
+    fontSize: 18,
     fontWeight: '800',
     color: TEXT,
   },
   brandMark: {
-    fontSize: 11,
+    fontSize: 14,
     fontWeight: '900',
     color: GOLD,
-    letterSpacing: 2,
+    letterSpacing: 0.5,
   },
-  summaryCard: {
-    flexDirection: 'row',
-    backgroundColor: CARD,
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(254,203,77,0.2)',
-    gap: 14,
-  },
-  thumb: {
-    width: 88,
-    height: 88,
-    borderRadius: 14,
-    backgroundColor: CARD_MUTED,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  summaryText: {
-    flex: 1,
-    justifyContent: 'center',
-    minWidth: 0,
-  },
-  lastOrderLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: MUTED,
-    letterSpacing: 1.2,
-    marginBottom: 6,
-  },
-  orderName: {
+  sectionHeading: {
     fontSize: 16,
-    fontWeight: '700',
-    color: TEXT,
-    lineHeight: 22,
-    marginBottom: 8,
-  },
-  price: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: GOLD,
-  },
-  sectionQuestion: {
-    fontSize: 17,
     fontWeight: '800',
     color: TEXT,
-    textAlign: 'center',
-    marginBottom: 16,
+    marginBottom: 10,
   },
-  overallStars: {
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  detailCard: {
+  experienceCard: {
     backgroundColor: CARD,
     borderRadius: 16,
     padding: 16,
-    marginBottom: 22,
+    marginBottom: 18,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
+    gap: 18,
   },
-  detailRow: {
+  experienceRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
   },
-  detailLabel: {
-    fontSize: 14,
+  experienceLabel: {
+    fontSize: 13,
     fontWeight: '600',
     color: TEXT,
-    flex: 1,
   },
-  detailDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    marginVertical: 14,
-  },
-  subheading: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: TEXT,
-    marginBottom: 12,
-  },
-  chipWrap: {
+  rateDishHeader: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 8,
+  },
+  rateDishTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: TEXT,
+  },
+  dishCard: {
+    backgroundColor: CARD,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
     marginBottom: 22,
   },
-  chip: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 999,
+  dishTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  dishThumbWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 14,
+    overflow: 'hidden',
     backgroundColor: CARD_MUTED,
+    marginRight: 12,
+  },
+  dishThumb: {
+    width: '100%',
+    height: '100%',
+  },
+  dishContent: {
+    flex: 1,
+    gap: 8,
+  },
+  dishName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: TEXT,
+  },
+  tagRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  tagChip: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
   },
-  chipOn: {
+  tagChipActive: {
     backgroundColor: GOLD,
     borderColor: GOLD,
   },
-  chipText: {
-    fontSize: 13,
+  tagText: {
+    fontSize: 12,
     fontWeight: '600',
     color: TEXT,
   },
-  chipTextOn: {
+  tagTextActive: {
     color: BG,
-  },
-  photoBox: {
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderColor: 'rgba(254,203,77,0.45)',
-    borderRadius: 14,
-    paddingVertical: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-    backgroundColor: 'rgba(0,0,0,0.25)',
-  },
-  photoHint: {
-    marginTop: 10,
-    fontSize: 13,
-    color: MUTED,
-    fontWeight: '600',
-  },
-  textArea: {
-    minHeight: 120,
-    backgroundColor: CARD,
-    borderRadius: 14,
-    padding: 14,
-    fontSize: 14,
-    color: TEXT,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  submitBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    backgroundColor: GOLD,
-    paddingVertical: 16,
-    borderRadius: 999,
-    marginBottom: 16,
-    minHeight: 52,
-  },
-  submitBtnDisabled: {
-    opacity: 0.85,
-  },
-  submitText: {
-    fontSize: 15,
-    fontWeight: '900',
-    color: BG,
-    letterSpacing: 0.8,
   },
 });

@@ -1,6 +1,11 @@
 import React, { createContext, useContext, useCallback, useState } from 'react';
 
-export type CartAddon = { id: string; name: string; price: string };
+export type CartAddon = {
+  id: string;
+  name: string;
+  price: string;
+  image?: { uri: string } | string | null;
+};
 
 export type CartItem = {
   id: string;
@@ -34,6 +39,22 @@ function parsePrice(p: string): number {
   return parseFloat(String(p).replace(/[$,]/g, '')) || 0;
 }
 
+function getAddonsSignature(addons: CartAddon[]): string {
+  return addons
+    .map((a) => ({
+      id: String(a.id ?? '').trim(),
+      name: String(a.name ?? '').trim(),
+      price: String(a.price ?? '').trim(),
+    }))
+    .sort((a, b) => {
+      if (a.id !== b.id) return a.id.localeCompare(b.id);
+      if (a.name !== b.name) return a.name.localeCompare(b.name);
+      return a.price.localeCompare(b.price);
+    })
+    .map((a) => `${a.id}|${a.name}|${a.price}`)
+    .join('||');
+}
+
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
 
@@ -41,15 +62,29 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     (item: Omit<CartItem, 'id' | 'quantity'> & { quantity?: number }) => {
       const quantity = item.quantity ?? 1;
       const addons = Array.isArray(item.addons) ? item.addons : [];
-      setItems((prev) => [
-        ...prev,
-        {
-          ...item,
-          id: nextCartId(),
-          quantity,
-          addons,
-        },
-      ]);
+      setItems((prev) => {
+        const nextAddonsSig = getAddonsSignature(addons);
+        const existingIndex = prev.findIndex((p) => {
+          if (String(p.productId) !== String(item.productId)) return false;
+          return getAddonsSignature(Array.isArray(p.addons) ? p.addons : []) === nextAddonsSig;
+        });
+
+        if (existingIndex === -1) {
+          return [
+            ...prev,
+            {
+              ...item,
+              id: nextCartId(),
+              quantity,
+              addons,
+            },
+          ];
+        }
+
+        return prev.map((p, idx) =>
+          idx === existingIndex ? { ...p, quantity: p.quantity + quantity } : p
+        );
+      });
     },
     []
   );

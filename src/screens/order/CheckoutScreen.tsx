@@ -413,7 +413,7 @@ export default function CheckoutScreen() {
         : mode === 'dining'
           ? 'Dine In'
           : 'Take away';
-      await placeOrder({
+      const placedOrder = await placeOrder({
         customer,
         items: formatItemsForOrder(items),
         type: orderTypePayload,
@@ -426,6 +426,11 @@ export default function CheckoutScreen() {
         paymentStatus: payStatus,
         paymentId: stripePaymentIntentId,
       });
+      const placedOrderIdRaw =
+        placedOrder?.orderId ??
+        placedOrder?.id ??
+        (typeof placedOrder?._id === 'string' ? placedOrder._id : undefined);
+      const placedOrderId = placedOrderIdRaw != null ? String(placedOrderIdRaw).trim() : '';
 
       clearCart();
       if (payModeSelected === 'stripe') {
@@ -433,13 +438,23 @@ export default function CheckoutScreen() {
       } else {
         showToast('Order placed', 'success');
       }
-      navigation.reset({
-        routes: [
-          { name: 'Main' },
-          { name: 'Orders', params: { showOrderSuccessToast: true } },
-        ],
-        index: 1,
-      });
+      if (placedOrderId) {
+        navigation.reset({
+          routes: [
+            { name: 'Main' },
+            { name: 'ViewOrderDetails', params: { orderId: placedOrderId } },
+          ],
+          index: 1,
+        });
+      } else {
+        navigation.reset({
+          routes: [
+            { name: 'Main' },
+            { name: 'Orders', params: { showOrderSuccessToast: true } },
+          ],
+          index: 1,
+        });
+      }
     } catch (err) {
       showToast(normalizeOrderErrorMessage(err), 'error');
     } finally {
@@ -450,7 +465,7 @@ export default function CheckoutScreen() {
   const showLoginGate = !authChecking && !isLoggedIn;
 
   const scrollBottomPadding =
-    20 + keyboardBottomInset + (keyboardBottomInset > 0 ? Math.max(insets.bottom, 12) : 0);
+    8 + keyboardBottomInset + (keyboardBottomInset > 0 ? Math.max(insets.bottom, 8) : 0);
 
   const keyboardVerticalOffset = Platform.OS === 'ios' ? insets.top + 4 : 0;
 
@@ -510,10 +525,35 @@ export default function CheckoutScreen() {
                     <Text style={styles.cartRowName} numberOfLines={2}>
                       {cartItem.name}
                     </Text>
-                    {getAddonsSubtitle(cartItem) ? (
-                      <Text style={styles.cartRowAddons} numberOfLines={2}>
-                        Add-ons: {getAddonsSubtitle(cartItem)}
-                      </Text>
+                    {Array.isArray(cartItem.addons) && cartItem.addons.length > 0 ? (
+                      <View style={styles.cartAddonList}>
+                        {cartItem.addons.map((addon) => (
+                          <View key={`${cartItem.id}-${addon.id}`} style={styles.cartAddonRow}>
+                            <View style={styles.cartAddonImageWrap}>
+                              {addon.image ? (
+                                <Image
+                                  source={typeof addon.image === 'string' ? { uri: addon.image } : addon.image}
+                                  style={styles.cartAddonImage}
+                                  resizeMode="cover"
+                                />
+                              ) : (
+                                <MaterialIcons name="image-not-supported" size={14} color="rgba(255,255,255,0.45)" />
+                              )}
+                            </View>
+                            <View style={styles.cartAddonMeta}>
+                              <Text style={styles.cartAddonName} numberOfLines={1}>
+                                {addon.name}
+                              </Text>
+                              <View style={styles.cartAddonMetaRow}>
+                                <Text style={styles.cartAddonPrice}>
+                                  {formatPrice(String((parsePrice(addon.price) * cartItem.quantity).toFixed(2)))}
+                                </Text>
+                                <Text style={styles.cartAddonQty}>×{cartItem.quantity}</Text>
+                              </View>
+                            </View>
+                          </View>
+                        ))}
+                      </View>
                     ) : null}
                     <View style={styles.cartRowBottom}>
                       <Text style={styles.cartRowPrice}>
@@ -527,31 +567,6 @@ export default function CheckoutScreen() {
             </View>
           )}
         </View>
-
-        {items.length > 0 ? (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Total bill</Text>
-            <View style={styles.totalBillPanel}>
-              <View style={styles.totalBillRow}>
-                <Text style={styles.totalBillRowLabel}>Subtotal</Text>
-                <Text style={styles.totalBillRowAmount}>{formatPrice(cartSubtotal.toFixed(2))}</Text>
-              </View>
-              {discountPreviewValid && discountPreview && discountPreview.discountAmount > 0 ? (
-                <View style={[styles.totalBillRow, styles.totalBillRowDiscount]}>
-                  <Text style={styles.totalBillRowLabel}>Discount</Text>
-                  <Text style={styles.totalBillRowAmountDiscount}>
-                    −{formatPrice(discountPreview.discountAmount.toFixed(2))}
-                  </Text>
-                </View>
-              ) : null}
-              <View style={styles.totalBillDivider} />
-              <View style={styles.totalBillRowGrand}>
-                <Text style={styles.totalBillGrandLabel}>Total</Text>
-                <Text style={styles.totalBillGrandAmount}>{formatPrice(orderToCharge.toFixed(2))}</Text>
-              </View>
-            </View>
-          </View>
-        ) : null}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Order notes</Text>
@@ -690,6 +705,31 @@ export default function CheckoutScreen() {
           ) : null}
           </View>
         </View>
+
+        {items.length > 0 ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Total bill</Text>
+            <View style={styles.totalBillPanel}>
+              <View style={styles.totalBillRow}>
+                <Text style={styles.totalBillRowLabel}>Subtotal</Text>
+                <Text style={styles.totalBillRowAmount}>{formatPrice(cartSubtotal.toFixed(2))}</Text>
+              </View>
+              {discountPreviewValid && discountPreview && discountPreview.discountAmount > 0 ? (
+                <View style={[styles.totalBillRow, styles.totalBillRowDiscount]}>
+                  <Text style={styles.totalBillRowLabel}>Discount</Text>
+                  <Text style={styles.totalBillRowAmountDiscount}>
+                    −{formatPrice(discountPreview.discountAmount.toFixed(2))}
+                  </Text>
+                </View>
+              ) : null}
+              <View style={styles.totalBillDivider} />
+              <View style={styles.totalBillRowGrand}>
+                <Text style={styles.totalBillGrandLabel}>Total</Text>
+                <Text style={styles.totalBillGrandAmount}>{formatPrice(orderToCharge.toFixed(2))}</Text>
+              </View>
+            </View>
+          </View>
+        ) : null}
 
         <View style={styles.bottomSpacer} />
         </>
@@ -909,18 +949,18 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: HORIZONTAL_PADDING,
-    paddingTop: 16,
-    paddingBottom: 20,
+    paddingTop: 10,
+    paddingBottom: 8,
   },
   section: {
-    marginBottom: 22,
+    marginBottom: 14,
   },
   panel: {
     backgroundColor: CARD_BG,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(229,185,72,0.22)',
-    padding: 14,
+    padding: 10,
   },
   summaryPanel: {
     backgroundColor: CARD_BG,
@@ -934,8 +974,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(229,185,72,0.22)',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   totalBillRow: {
     flexDirection: 'row',
@@ -964,7 +1004,7 @@ const styles = StyleSheet.create({
   totalBillDivider: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: 'rgba(255,255,255,0.12)',
-    marginVertical: 10,
+    marginVertical: 8,
   },
   totalBillRowGrand: {
     flexDirection: 'row',
@@ -986,14 +1026,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: MUTED_TEXT,
-    marginBottom: 10,
+    marginBottom: 8,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 24,
+    paddingVertical: 16,
   },
   emptyStateText: {
     fontSize: 15,
@@ -1003,8 +1043,8 @@ const styles = StyleSheet.create({
   cartRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   cartRowDivider: {
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -1035,18 +1075,65 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: TEXT_WHITE,
+    marginBottom: 4,
+  },
+  cartAddonList: {
+    gap: 6,
+    marginBottom: 4,
+  },
+  cartAddonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(254,203,77,0.16)',
+    borderRadius: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+  cartAddonImageWrap: {
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(254,203,77,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  cartAddonImage: {
+    width: '100%',
+    height: '100%',
+  },
+  cartAddonMeta: {
+    flex: 1,
+  },
+  cartAddonName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: TEXT_WHITE,
     marginBottom: 2,
   },
-  cartRowAddons: {
+  cartAddonMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  cartAddonPrice: {
     fontSize: 11,
+    fontWeight: '700',
+    color: GOLD,
+  },
+  cartAddonQty: {
+    fontSize: 11,
+    fontWeight: '700',
     color: MUTED_TEXT,
-    marginBottom: 4,
   },
   cartRowBottom: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 6,
+    marginTop: 4,
   },
   cartRowPrice: {
     fontSize: 14,
@@ -1059,7 +1146,7 @@ const styles = StyleSheet.create({
     color: TEXT_WHITE,
   },
   paymentOptions: {
-    gap: 10,
+    gap: 8,
   },
   paymentOption: {
     flexDirection: 'row',
@@ -1067,7 +1154,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     backgroundColor: BG_DARK,
     borderRadius: 14,
-    padding: 14,
+    padding: 10,
     borderWidth: 2,
     borderColor: 'rgba(255,255,255,0.1)',
   },
@@ -1087,7 +1174,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(254, 203, 77, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 14,
+    marginRight: 10,
   },
   paymentOptionTitle: {
     fontSize: 16,
@@ -1100,8 +1187,8 @@ const styles = StyleSheet.create({
     color: MUTED_TEXT,
   },
   cardForm: {
-    marginTop: 14,
-    padding: 14,
+    marginTop: 10,
+    padding: 10,
     backgroundColor: CARD_BG,
     borderRadius: 12,
     borderWidth: 1,
@@ -1111,7 +1198,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: MUTED_TEXT,
-    marginBottom: 6,
+    marginBottom: 4,
   },
   cardFieldWrap: {
     backgroundColor: CARD_BG,
@@ -1119,7 +1206,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(254, 203, 77, 0.28)',
     paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingVertical: 6,
   },
   cardField: {
     width: '100%',
@@ -1129,7 +1216,7 @@ const styles = StyleSheet.create({
     backgroundColor: BG_DARK,
     borderRadius: 10,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 10,
     fontSize: 15,
     color: TEXT_WHITE,
     borderWidth: 1,
@@ -1139,12 +1226,12 @@ const styles = StyleSheet.create({
     backgroundColor: CARD_BG,
     borderRadius: 12,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 8,
     fontSize: 14,
     color: TEXT_WHITE,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.15)',
-    minHeight: 72,
+    minHeight: 60,
     textAlignVertical: 'top',
   },
   discountRow: {
@@ -1158,7 +1245,7 @@ const styles = StyleSheet.create({
     backgroundColor: CARD_BG,
     borderRadius: 12,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 10,
     fontSize: 15,
     fontWeight: '600',
     color: TEXT_WHITE,
@@ -1180,13 +1267,13 @@ const styles = StyleSheet.create({
     opacity: 0.88,
   },
   discountAppliedHint: {
-    marginTop: 8,
+    marginTop: 6,
     fontSize: 12,
     fontWeight: '600',
     color: 'rgba(254,203,77,0.85)',
   },
   bottomSpacer: {
-    height: 20,
+    height: 8,
   },
   bottomBar: {
     flexDirection: 'row',

@@ -326,6 +326,10 @@ export default function ViewOrderDetailsScreen() {
     () => (cancelled ? FIVE_STATUS_STEPS.length : fiveStepIndex),
     [cancelled, fiveStepIndex]
   );
+  const delivered = useMemo(() => {
+    const s = normalizeStatus(order?.status);
+    return s.includes('deliver') && !s.includes('out') && !s.includes('cancel');
+  }, [order?.status]);
 
   const deliveryAddressLine = useMemo(() => {
     const fromOrder = order?.address?.trim();
@@ -520,9 +524,9 @@ export default function ViewOrderDetailsScreen() {
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <Pressable style={styles.backBtn} onPress={() => navigation.goBack()} hitSlop={8}>
-            <Ionicons name="arrow-back" size={18} color={TEXT_WHITE} />
+            <Ionicons name="arrow-back" size={20} color={BG_DARK} />
           </Pressable>
-          <Text style={styles.headerTitle}>Order status</Text>
+          <Text style={styles.headerTitle}>Order Tracking</Text>
           <View style={styles.headerRightSpacer} />
         </View>
 
@@ -594,6 +598,25 @@ export default function ViewOrderDetailsScreen() {
           </View>
           <StatusProgressLine steps={progressSteps} activeIndex={progressActiveIndex} />
         </View>
+        {delivered ? (
+          <View style={styles.addReviewWrap}>
+            <Pressable
+              style={styles.addReviewBtn}
+              onPress={() =>
+                navigation.navigate('RateYourFeast', {
+                  orderId: String(order.id),
+                  items: order.items || '',
+                  amount: order.amount || '',
+                  orderType: order.type || '',
+                })
+              }
+              accessibilityRole="button"
+              accessibilityLabel="Add a review"
+            >
+              <Text style={styles.addReviewBtnText}>Rate Your Feast ★</Text>
+            </Pressable>
+          </View>
+        ) : null}
 
         {/* Location */}
         <View style={styles.cardCompact}>
@@ -673,31 +696,29 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: HORIZONTAL_PADDING,
-    paddingTop: 10,
-    paddingBottom: 12,
+    paddingVertical: 6,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
   backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: GOLD,
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerRightSpacer: {
-    width: 40,
-    height: 40,
+    width: 32,
+    height: 32,
   },
   headerTitle: {
     flex: 1,
     textAlign: 'center',
-    fontSize: 16,
-    fontWeight: '800',
+    fontSize: 14,
+    fontWeight: '700',
     color: TEXT_WHITE,
-    letterSpacing: 0.3,
   },
   cancelBanner: {
     marginHorizontal: HORIZONTAL_PADDING,
@@ -796,6 +817,26 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '800',
     textTransform: 'capitalize',
+  },
+  addReviewWrap: {
+    marginHorizontal: HORIZONTAL_PADDING,
+    marginTop: 2,
+    marginBottom: 10,
+  },
+  addReviewBtn: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: GOLD,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+  },
+  addReviewBtnText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: BG_DARK,
+    letterSpacing: 0.2,
   },
   addressBlockText: {
     fontSize: 14,
