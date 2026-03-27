@@ -7,6 +7,7 @@ import {
   Pressable,
   Linking,
   Dimensions,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
@@ -16,6 +17,7 @@ const WebView = require('react-native-webview').WebView;
 import { getNetworkErrorMessage } from '../../api/apiConfig';
 import { getVisit, type VisitLocation } from '../../api/content';
 import { getReviewByOrderId } from '../../api/review';
+import { getMenuItems } from '../../api/discoverScreen';
 import {
   getMyOrders,
   type MyOrdersResponse,
@@ -192,6 +194,17 @@ function splitItemsSummary(items: string): string[] {
     .filter(Boolean);
 }
 
+function extractPrimaryOrderItemName(itemsSummary: string): string {
+  const first = String(itemsSummary ?? '').split(',')[0]?.trim() ?? '';
+  if (!first) return '';
+  return first
+    .replace(/\(.*?\)/g, ' ')
+    .replace(/\[.*?\]/g, ' ')
+    .replace(/\s*x\d+\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function buildMapHtml(embedUrl: string): string {
   const safe = embedUrl.replace(/"/g, '&quot;');
   return `
@@ -332,6 +345,7 @@ export default function ViewOrderDetailsScreen() {
   const [savedDefaultAddress, setSavedDefaultAddress] = useState<Address | null>(null);
   const [reviewAlreadyExists, setReviewAlreadyExists] = useState(false);
   const [checkingExistingReview, setCheckingExistingReview] = useState(false);
+  const [orderItemImageUri, setOrderItemImageUri] = useState('');
 
   const statusColor = useMemo(() => getStatusColor(order?.status), [order?.status]);
   const delivery = order ? isDeliveryOrder(order) : true;
@@ -421,6 +435,36 @@ export default function ViewOrderDetailsScreen() {
       };
     }, [order?.id, order?.type])
   );
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const primaryName = extractPrimaryOrderItemName(order?.items || '');
+        if (!primaryName) {
+          if (active) setOrderItemImageUri('');
+          return;
+        }
+        const menuItems = await getMenuItems();
+        if (!active) return;
+        const target = primaryName.trim().toLowerCase();
+        const found = menuItems.find((m) => String(m.name ?? '').trim().toLowerCase() === target);
+        const raw = found?.image;
+        const uri =
+          typeof raw === 'string'
+            ? raw.trim()
+            : raw && typeof raw === 'object' && 'uri' in raw && typeof (raw as { uri?: unknown }).uri === 'string'
+              ? String((raw as { uri: string }).uri).trim()
+              : '';
+        setOrderItemImageUri(uri);
+      } catch {
+        if (active) setOrderItemImageUri('');
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [order?.items]);
 
   const findOrderInResponse = useCallback(
     (data: MyOrdersResponse): Order | null => {
@@ -605,6 +649,15 @@ export default function ViewOrderDetailsScreen() {
         <View style={styles.cardCompact}>
           <Text style={styles.sectionTitle}>Order summary</Text>
           <View style={styles.summaryHeroRow}>
+            <View style={styles.summaryItemThumbWrap}>
+              {orderItemImageUri ? (
+                <Image source={{ uri: orderItemImageUri }} style={styles.summaryItemThumb} resizeMode="cover" />
+              ) : (
+                <View style={styles.summaryItemThumbFallback}>
+                  <Ionicons name="image-outline" size={18} color={MUTED_TEXT} />
+                </View>
+              )}
+            </View>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.orderItemTitle} numberOfLines={3}>
                 {order.items || 'Your order'}
@@ -973,6 +1026,26 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 12,
     marginTop: 8,
+  },
+  summaryItemThumbWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(254,203,77,0.22)',
+  },
+  summaryItemThumb: {
+    width: '100%',
+    height: '100%',
+  },
+  summaryItemThumbFallback: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
   orderItemTitle: {
     fontSize: 14,

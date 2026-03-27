@@ -208,20 +208,9 @@ export default function CheckoutScreen() {
     let cancelled = false;
     (async () => {
       try {
-        const modesRaw = (await getOrderModes()) as unknown as Record<string, unknown>;
+        const modes = await getOrderModes();
         if (cancelled) return;
-        const deliveryObj =
-          modesRaw && typeof modesRaw.delivery === 'object'
-            ? (modesRaw.delivery as Record<string, unknown>)
-            : null;
-        const fee = parsePositiveNumber(
-          deliveryObj?.fee ??
-            deliveryObj?.deliveryFee ??
-            deliveryObj?.delivery_fee ??
-            modesRaw.fee ??
-            modesRaw.deliveryFee ??
-            modesRaw.delivery_fee
-        );
+        const fee = parsePositiveNumber(modes.deliveryFee);
         setDeliveryFee(fee ?? 0);
       } catch {
         if (!cancelled) setDeliveryFee(0);

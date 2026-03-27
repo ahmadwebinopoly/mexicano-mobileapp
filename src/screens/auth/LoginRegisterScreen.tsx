@@ -86,6 +86,13 @@ export default function LoginRegisterScreen() {
     setToast({ message, type });
   };
 
+  const goToDiscoverAfterAuth = () => {
+    navigation.reset({
+      index: 0,
+      routes: [{ name: 'Main' }],
+    });
+  };
+
   // Google OAuth client id is public in the mobile app bundle.
   // The client secret must stay server-side.
   const googleClientId =
@@ -151,7 +158,7 @@ export default function LoginRegisterScreen() {
       void registerForPushNotifications();
 
       showToast('Signed in with Google successfully.', 'success');
-      setTimeout(() => navigation.goBack(), 800);
+      setTimeout(() => goToDiscoverAfterAuth(), 800);
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Google sign-in failed.', 'error');
     } finally {
@@ -178,7 +185,7 @@ export default function LoginRegisterScreen() {
       setLoginEmail('');
       setLoginPassword('');
       showToast('Signed in successfully.', 'success');
-      setTimeout(() => navigation.goBack(), 800);
+      setTimeout(() => goToDiscoverAfterAuth(), 800);
     } catch (e) {
       showToast(normalizeLoginErrorMessage(e), 'error');
     } finally {
@@ -241,7 +248,7 @@ export default function LoginRegisterScreen() {
       setRegEmail('');
       setRegPassword('');
       setRegErrors({});
-      navigation.goBack();
+      goToDiscoverAfterAuth();
     } catch (e) {
       // If auto-login fails, fall back to showing the Login tab.
       setAuthTab('Login');
@@ -328,33 +335,7 @@ export default function LoginRegisterScreen() {
                 )}
               </Pressable>
 
-              <View style={styles.dividerRow}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>or continue with</Text>
-                <View style={styles.dividerLine} />
-              </View>
-
-              <View style={styles.socialRow}>
-                <Pressable
-                  style={styles.socialButton}
-                  onPress={() => {
-                    void handleGoogleSocialLogin();
-                  }}
-                  disabled={googleSubmitting}
-                >
-                  <FontAwesome name="google" size={20} color="#DB4437" />
-                  <Text style={styles.socialButtonText}>Google</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.socialButton}
-                  onPress={() => {
-                    // Reserved for future Facebook auth integration.
-                  }}
-                >
-                  <FontAwesome name="facebook" size={20} color="#1877F2" />
-                  <Text style={styles.socialButtonText}>Facebook</Text>
-                </Pressable>
-              </View>
+              {/* Social login hidden as requested */}
             </>
           ) : (
             <>
@@ -442,33 +423,7 @@ export default function LoginRegisterScreen() {
                 )}
               </Pressable>
 
-              <View style={styles.dividerRow}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>or continue with</Text>
-                <View style={styles.dividerLine} />
-              </View>
-
-              <View style={styles.socialRow}>
-                <Pressable
-                  style={styles.socialButton}
-                  onPress={() => {
-                    void handleGoogleSocialLogin();
-                  }}
-                  disabled={googleSubmitting}
-                >
-                  <FontAwesome name="google" size={20} color="#DB4437" />
-                  <Text style={styles.socialButtonText}>Google</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.socialButton}
-                  onPress={() => {
-                    showToast('Facebook login coming soon', 'error');
-                  }}
-                >
-                  <FontAwesome name="facebook" size={20} color="#1877F2" />
-                  <Text style={styles.socialButtonText}>Facebook</Text>
-                </Pressable>
-              </View>
+              {/* Social login hidden as requested */}
             </>
           )}
         </ScrollView>

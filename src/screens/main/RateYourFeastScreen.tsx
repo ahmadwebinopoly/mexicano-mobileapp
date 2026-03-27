@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { submitReview } from '../../api/review';
+import { getMenuItems } from '../../api/discoverScreen';
 
 const BG = '#0B1D1B';
 const CARD = '#152C29';
@@ -49,6 +50,18 @@ function modeTags(mode: ReviewMode): string[] {
   if (mode === 'delivery') return ['Perfect Spice', 'Flavorful', 'Portion Size'];
   if (mode === 'dining') return ['Great Service', 'Fresh', 'Portion Size'];
   return ['Ready on Time', 'Well Packed', 'Flavorful'];
+}
+
+function extractPrimaryDishName(itemsSummary: string): string {
+  const raw = String(itemsSummary ?? '').trim();
+  if (!raw) return '';
+  const first = raw.split(',')[0]?.trim() ?? '';
+  return first
+    .replace(/\(.*?\)/g, ' ')
+    .replace(/\[.*?\]/g, ' ')
+    .replace(/\s*x\d+\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function StarPicker({
@@ -94,6 +107,7 @@ export default function RateYourFeastScreen() {
   const [commentInputHeight, setCommentInputHeight] = useState(92);
   const [submitting, setSubmitting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [dishImageUri, setDishImageUri] = useState<string>('');
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [experienceRatings, setExperienceRatings] = useState<Record<string, number>>({
     a: 0,
@@ -116,6 +130,7 @@ export default function RateYourFeastScreen() {
   }, []);
 
   const titleLine = items?.trim() || 'AI Pastor Tacos (3)';
+  const primaryDishName = useMemo(() => extractPrimaryDishName(items), [items]);
   const reviewOrderType = useMemo<'Delivery' | 'Pickup' | 'Dine In'>(() => {
     if (mode === 'delivery') return 'Delivery';
     if (mode === 'dining') return 'Dine In';
@@ -123,6 +138,35 @@ export default function RateYourFeastScreen() {
   }, [mode]);
 
   const canSubmit = dishRating > 0 && experienceRatings.a > 0 && experienceRatings.b > 0 && experienceRatings.c > 0 && !!orderId?.trim();
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!primaryDishName) {
+          if (!cancelled) setDishImageUri('');
+          return;
+        }
+        const menuItems = await getMenuItems();
+        if (cancelled) return;
+        const target = primaryDishName.trim().toLowerCase();
+        const found = menuItems.find((m) => String(m.name ?? '').trim().toLowerCase() === target);
+        const imageRaw = found?.image;
+        const uri =
+          typeof imageRaw === 'string'
+            ? imageRaw.trim()
+            : imageRaw && typeof imageRaw === 'object' && 'uri' in imageRaw && typeof (imageRaw as { uri?: unknown }).uri === 'string'
+              ? String((imageRaw as { uri: string }).uri).trim()
+              : '';
+        setDishImageUri(uri);
+      } catch {
+        if (!cancelled) setDishImageUri('');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [primaryDishName]);
 
   const handleSubmit = async () => {
     if (!orderId?.trim()) {
@@ -223,11 +267,13 @@ export default function RateYourFeastScreen() {
           <View style={styles.dishCard}>
             <View style={styles.dishTopRow}>
               <View style={styles.dishThumbWrap}>
-                <Image
-                  source={{ uri: 'https://placehold.co/80x80/png' }}
-                  style={styles.dishThumb}
-                  resizeMode="cover"
-                />
+                {dishImageUri ? (
+                  <Image source={{ uri: dishImageUri }} style={styles.dishThumb} resizeMode="cover" />
+                ) : (
+                  <View style={styles.dishThumbFallback}>
+                    <Ionicons name="image-outline" size={20} color={MUTED} />
+                  </View>
+                )}
               </View>
               <View style={styles.dishContent}>
                 <Text style={styles.dishName} numberOfLines={1}>{titleLine}</Text>
@@ -383,6 +429,13 @@ const styles = StyleSheet.create({
   dishThumb: {
     width: '100%',
     height: '100%',
+  },
+  dishThumbFallback: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: CARD_MUTED,
   },
   dishContent: {
     flex: 1,

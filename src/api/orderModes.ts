@@ -12,6 +12,8 @@ export interface OrderModes {
   delivery: boolean;
   dining: boolean;
   takeaway: boolean;
+  /** Backend-managed delivery fee (e.g. 4.99). */
+  deliveryFee?: number;
   deliveryRadiusEnabled?: boolean;
   deliveryRadiusKm?: number;
 }
@@ -46,6 +48,7 @@ const DEFAULT_ORDER_MODES: OrderModes = {
   delivery: true,
   dining: true,
   takeaway: true,
+  deliveryFee: 0,
   deliveryRadiusEnabled: false,
   deliveryRadiusKm: 10,
 };
@@ -63,6 +66,8 @@ function toPositiveNumber(value: unknown): number | null {
 }
 
 function normalizeOrderModes(raw: OrderModesResponse | null): OrderModes {
+  const root =
+    (raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}) as Record<string, unknown>;
   const modes = raw?.data?.orderModes ?? raw?.orderModes ?? raw;
   const envelope =
     (raw?.data && typeof raw.data === 'object' ? (raw.data as Record<string, unknown>) : {}) as Record<string, unknown>;
@@ -70,6 +75,43 @@ function normalizeOrderModes(raw: OrderModesResponse | null): OrderModes {
     return DEFAULT_ORDER_MODES;
   }
   const m = modes as Record<string, unknown>;
+  // Prefer full delivery object from root/envelope (contains fee/minOrder/radius),
+  // then fall back to modes.delivery which may be just boolean.
+  const rootDeliveryObj =
+    root.delivery && typeof root.delivery === 'object'
+      ? (root.delivery as Record<string, unknown>)
+      : null;
+  const envelopeDeliveryObj =
+    envelope.delivery && typeof envelope.delivery === 'object'
+      ? (envelope.delivery as Record<string, unknown>)
+      : null;
+  const deliveryRaw = rootDeliveryObj ?? envelopeDeliveryObj ?? m.delivery ?? root.delivery ?? envelope.delivery;
+  const deliveryObj =
+    deliveryRaw && typeof deliveryRaw === 'object'
+      ? (deliveryRaw as Record<string, unknown>)
+      : null;
+
+  const deliveryEnabled =
+    deliveryObj != null
+      ? (deliveryObj.enabled == null ? true : toBool(deliveryObj.enabled))
+      : toBool(deliveryRaw);
+
+  const deliveryFee =
+    toPositiveNumber(
+      deliveryObj?.fee ??
+        deliveryObj?.deliveryFee ??
+        deliveryObj?.delivery_fee ??
+        (m as Record<string, unknown>).fee ??
+        (m as Record<string, unknown>).deliveryFee ??
+        (m as Record<string, unknown>).delivery_fee ??
+        root.fee ??
+        root.deliveryFee ??
+        root.delivery_fee ??
+        envelope.fee ??
+        envelope.deliveryFee ??
+        envelope.delivery_fee
+    ) ?? 0;
+
   const deliveryRadiusEnabled = toBool(
     m.deliveryRadiusEnabled ??
       m.delivery_radius_enabled ??
@@ -88,9 +130,10 @@ function normalizeOrderModes(raw: OrderModesResponse | null): OrderModes {
         envelope.radius_km
     ) ?? 10;
   return {
-    delivery: toBool(m.delivery),
+    delivery: deliveryEnabled,
     dining: toBool(m.dining),
     takeaway: toBool(m.takeaway),
+    deliveryFee,
     deliveryRadiusEnabled,
     deliveryRadiusKm,
   };
