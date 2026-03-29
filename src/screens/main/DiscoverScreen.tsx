@@ -58,6 +58,12 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const HORIZONTAL_PADDING = 16;
 const BANNER_WIDTH = SCREEN_WIDTH - HORIZONTAL_PADDING * 2;
 const BANNER_HEIGHT = 160;
+/** Visible sliver of previous/next banner on left/right (peek carousel). */
+const BANNER_PEEK = 20;
+const BANNER_GAP = 10;
+/** Card width when multiple banners: viewport minus both peeks. */
+const BANNER_CARD_WIDTH = BANNER_WIDTH - 2 * BANNER_PEEK;
+const BANNER_SNAP_INTERVAL = BANNER_CARD_WIDTH + BANNER_GAP;
 const SEARCH_WRAP_HEIGHT = 12 + 44 + 10; // searchWrap paddingTop + searchBar height + paddingBottom
 const TABS_WRAP_HEIGHT = 50; // tab pills + paddingBottom so in-flow tabs are fully off screen before sticky shows
 const STICKY_TABS_THRESHOLD = BANNER_HEIGHT + SEARCH_WRAP_HEIGHT + TABS_WRAP_HEIGHT;
@@ -333,8 +339,6 @@ export default function DiscoverScreen() {
   const [restaurantMapsUrl, setRestaurantMapsUrl] = useState<string | null>(null);
   const [bannerSources, setBannerSources] = useState<Array<{ id: string; source: ImageSourcePropType }>>([]);
   const [bannerLoading, setBannerLoading] = useState(true);
-  const [activeBannerIndex, setActiveBannerIndex] = useState(0);
-  const bannerScrollRef = useRef<ScrollView>(null);
   const [showHeaderModeModal, setShowHeaderModeModal] = useState(false);
   const [modalSelectedMode, setModalSelectedMode] = useState<OrderMode>('delivery');
   const [defaultAddressId, setDefaultAddressId] = useState<string | null>(null);
@@ -496,7 +500,14 @@ export default function DiscoverScreen() {
   const mainListRef = useRef<SectionList<DiscoverGridRow>>(null);
   const tabsScrollRef = useRef<ScrollView>(null);
   const stickyTabsScrollRef = useRef<ScrollView>(null);
+  /** Multi-banner carousel: open on 2nd slide (1 peek left, 3 peek right when n ≥ 3). */
+  const bannerCarouselRef = useRef<ScrollView>(null);
+  const bannerDefaultScrollKeyRef = useRef<string | null>(null);
   const [showStickyTabs, setShowStickyTabs] = useState(false);
+
+  useEffect(() => {
+    bannerDefaultScrollKeyRef.current = null;
+  }, [bannerSources]);
   const prevStickyRef = useRef(false);
   const [headerHeight, setHeaderHeight] = useState(0);
   const [dishRatingStats, setDishRatingStats] = useState<Record<string, { avg: number; count: number }>>({});
@@ -1054,12 +1065,21 @@ export default function DiscoverScreen() {
     [scrollTabsToIndex, showStickyTabs]
   );
 
+  /** Default to 2nd banner centered (slide 1 peek left, slide 3 peek right when n ≥ 3). */
+  const onBannerCarouselContentSizeChange = useCallback(() => {
+    if (bannerSources.length <= 1) return;
+    const key = bannerSources.map((b) => b.id).join('|');
+    if (bannerDefaultScrollKeyRef.current === key) return;
+    bannerDefaultScrollKeyRef.current = key;
+    bannerCarouselRef.current?.scrollTo({ x: BANNER_SNAP_INTERVAL, animated: false });
+  }, [bannerSources]);
+
   const renderTabs = () => (
     <ScrollView
       ref={tabsScrollRef}
       horizontal
       showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.tabsContent}
+      contentContainerStyle={styles.tabsContentInFlow}
     >
       {categories.map((cat, index) => (
         <Pressable
@@ -1089,7 +1109,7 @@ export default function DiscoverScreen() {
       ref={stickyTabsScrollRef}
       horizontal
       showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.tabsContent}
+      contentContainerStyle={styles.tabsContentSticky}
     >
       {categories.map((cat, index) => (
         <Pressable
@@ -1113,6 +1133,12 @@ export default function DiscoverScreen() {
       ))}
     </ScrollView>
   );
+
+  const deliveryModalHasLocation =
+    deliveryModalLatitude != null &&
+    deliveryModalLongitude != null &&
+    Number.isFinite(deliveryModalLatitude) &&
+    Number.isFinite(deliveryModalLongitude);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
@@ -1249,41 +1275,43 @@ export default function DiscoverScreen() {
                       </>
                     )}
                   </Pressable>
-                  <TextInput
-                    style={styles.modalInput}
-                    value={deliveryModalCity}
-                    onChangeText={setDeliveryModalCity}
-                    placeholder="City"
-                    placeholderTextColor="rgba(11,29,27,0.4)"
-                  />
-                  <View style={styles.deliveryAddressFieldWrap}>
-                    <TextInput
-                      style={[
-                        styles.modalInput,
-                        styles.modalInputMultiline,
-                        styles.deliveryAddressInput,
-                        { minHeight: Math.max(58, deliveryAddressInputHeight) },
-                      ]}
-                      value={deliveryModalAddress}
-                      onChangeText={setDeliveryModalAddress}
-                      placeholder="Full address"
-                      placeholderTextColor="rgba(11,29,27,0.4)"
-                      multiline
-                      numberOfLines={2}
-                      onContentSizeChange={(e) => {
-                        const h = e.nativeEvent.contentSize.height;
-                        setDeliveryAddressInputHeight(Math.min(140, Math.max(58, h + 18)));
-                      }}
-                    />
-                    {deliveryModalLatitude != null && deliveryModalLongitude != null ? (
-                      <Pressable
-                        style={styles.deliveryAddressMapIconBtn}
-                        onPress={openDeliveryMapFromModal}
-                      >
-                        <MaterialIcons name="open-in-new" size={14} color={GOLD} />
-                      </Pressable>
-                    ) : null}
-                  </View>
+                  {deliveryModalHasLocation ? (
+                    <>
+                      <TextInput
+                        style={styles.modalInput}
+                        value={deliveryModalCity}
+                        onChangeText={setDeliveryModalCity}
+                        placeholder="City"
+                        placeholderTextColor="rgba(11,29,27,0.4)"
+                      />
+                      <View style={styles.deliveryAddressFieldWrap}>
+                        <TextInput
+                          style={[
+                            styles.modalInput,
+                            styles.modalInputMultiline,
+                            styles.deliveryAddressInput,
+                            { minHeight: Math.max(58, deliveryAddressInputHeight) },
+                          ]}
+                          value={deliveryModalAddress}
+                          onChangeText={setDeliveryModalAddress}
+                          placeholder="Full address"
+                          placeholderTextColor="rgba(11,29,27,0.4)"
+                          multiline
+                          numberOfLines={2}
+                          onContentSizeChange={(e) => {
+                            const h = e.nativeEvent.contentSize.height;
+                            setDeliveryAddressInputHeight(Math.min(140, Math.max(58, h + 18)));
+                          }}
+                        />
+                        <Pressable
+                          style={styles.deliveryAddressMapIconBtn}
+                          onPress={openDeliveryMapFromModal}
+                        >
+                          <MaterialIcons name="open-in-new" size={14} color={GOLD} />
+                        </Pressable>
+                      </View>
+                    </>
+                  ) : null}
                 </>
               ) : (
                 <>
@@ -1311,20 +1339,22 @@ export default function DiscoverScreen() {
                 </>
               )}
 
-              <Pressable
-                style={[
-                  styles.modalSelectBtn,
-                  modalSelectedMode === 'delivery' && deliverySaving && styles.modalLocationBtnDisabled,
-                ]}
-                onPress={() => void applyModeSelection()}
-                disabled={modalSelectedMode === 'delivery' && deliverySaving}
-              >
-                {modalSelectedMode === 'delivery' && deliverySaving ? (
-                  <ActivityIndicator size="small" color={BG_DARK} />
-                ) : (
-                  <Text style={styles.modalSelectBtnText}>Select</Text>
-                )}
-              </Pressable>
+              {modalSelectedMode !== 'delivery' || deliveryModalHasLocation ? (
+                <Pressable
+                  style={[
+                    styles.modalSelectBtn,
+                    modalSelectedMode === 'delivery' && deliverySaving && styles.modalLocationBtnDisabled,
+                  ]}
+                  onPress={() => void applyModeSelection()}
+                  disabled={modalSelectedMode === 'delivery' && deliverySaving}
+                >
+                  {modalSelectedMode === 'delivery' && deliverySaving ? (
+                    <ActivityIndicator size="small" color={BG_DARK} />
+                  ) : (
+                    <Text style={styles.modalSelectBtnText}>Select</Text>
+                  )}
+                </Pressable>
+              ) : null}
             </View>
           </KeyboardAvoidingView>
         </SafeAreaView>
@@ -1494,50 +1524,36 @@ export default function DiscoverScreen() {
                 </View>
               ) : bannerSources.length > 0 ? (
                 <View style={styles.bannerInnerWrap}>
-                  <ScrollView
-                    ref={bannerScrollRef}
-                    horizontal
-                    pagingEnabled
-                    showsHorizontalScrollIndicator={false}
-                    scrollEventThrottle={16}
-                    onMomentumScrollEnd={(e) => {
-                      const x = e.nativeEvent.contentOffset.x;
-                      const idx = Math.round(x / BANNER_WIDTH);
-                      setActiveBannerIndex(idx);
-                    }}
-                  >
-                    {bannerSources.map((b) => (
-                      <View key={b.id} style={styles.bannerSlide}>
-                        <Image source={b.source} style={styles.bannerImage} resizeMode="cover" />
-                      </View>
-                    ))}
-                  </ScrollView>
-
-                  {bannerSources.length > 1 && activeBannerIndex < bannerSources.length - 1 ? (
-                    <Pressable
-                      style={styles.bannerForwardBtn}
-                      onPress={() => {
-                        const next = Math.min(activeBannerIndex + 1, bannerSources.length - 1);
-                        bannerScrollRef.current?.scrollTo({ x: next * BANNER_WIDTH, animated: true });
-                        setActiveBannerIndex(next);
-                      }}
+                  {bannerSources.length === 1 ? (
+                    <View style={styles.bannerSlide}>
+                      <Image source={bannerSources[0].source} style={styles.bannerImage} resizeMode="cover" />
+                    </View>
+                  ) : (
+                    <ScrollView
+                      ref={bannerCarouselRef}
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      decelerationRate="fast"
+                      snapToInterval={BANNER_SNAP_INTERVAL}
+                      snapToAlignment="start"
+                      disableIntervalMomentum
+                      scrollEventThrottle={16}
+                      contentContainerStyle={styles.bannerCarouselContent}
+                      onContentSizeChange={onBannerCarouselContentSizeChange}
                     >
-                      <Ionicons name="chevron-forward" size={18} color={BG_DARK} />
-                    </Pressable>
-                  ) : null}
-
-                  {bannerSources.length > 1 && activeBannerIndex > 0 ? (
-                    <Pressable
-                      style={styles.bannerBackBtn}
-                      onPress={() => {
-                        const prev = Math.max(activeBannerIndex - 1, 0);
-                        bannerScrollRef.current?.scrollTo({ x: prev * BANNER_WIDTH, animated: true });
-                        setActiveBannerIndex(prev);
-                      }}
-                    >
-                      <Ionicons name="chevron-back" size={18} color={BG_DARK} />
-                    </Pressable>
-                  ) : null}
+                      {bannerSources.map((b, index) => (
+                        <View
+                          key={b.id}
+                          style={[
+                            styles.bannerSlidePeek,
+                            index < bannerSources.length - 1 ? { marginRight: BANNER_GAP } : null,
+                          ]}
+                        >
+                          <Image source={b.source} style={styles.bannerImage} resizeMode="cover" />
+                        </View>
+                      ))}
+                    </ScrollView>
+                  )}
                 </View>
               ) : (
                 // No banners from API: keep banner area but render nothing.
@@ -1850,6 +1866,18 @@ const styles = StyleSheet.create({
   bannerSlide: {
     width: BANNER_WIDTH,
     height: BANNER_HEIGHT,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  bannerCarouselContent: {
+    paddingHorizontal: BANNER_PEEK,
+    alignItems: 'center',
+  },
+  bannerSlidePeek: {
+    width: BANNER_CARD_WIDTH,
+    height: BANNER_HEIGHT,
+    borderRadius: 16,
+    overflow: 'hidden',
   },
   bannerInnerWrap: {
     flex: 1,
@@ -1857,40 +1885,6 @@ const styles = StyleSheet.create({
   bannerImage: {
     width: '100%',
     height: '100%',
-  },
-  bannerForwardBtn: {
-    position: 'absolute',
-    right: 10,
-    top: '50%',
-    marginTop: -16,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: GOLD,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  bannerBackBtn: {
-    position: 'absolute',
-    left: 10,
-    top: '50%',
-    marginTop: -16,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: GOLD,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 3,
   },
   bannerLoadingWrap: {
     flex: 1,
@@ -1927,10 +1921,17 @@ const styles = StyleSheet.create({
     backgroundColor: BG_DARK,
     paddingBottom: 10,
   },
-  tabsContent: {
-    paddingHorizontal: HORIZONTAL_PADDING,
-    gap: 8,
+  /** In ListHeader: SectionList `scrollContent` already applies horizontal padding — do not pad left again. */
+  tabsContentInFlow: {
+    paddingLeft: 0,
     paddingRight: HORIZONTAL_PADDING + 32,
+    gap: 8,
+  },
+  /** Sticky row is `position: 'absolute'` (not inside padded scroll content) — match section title inset. */
+  tabsContentSticky: {
+    paddingLeft: HORIZONTAL_PADDING,
+    paddingRight: HORIZONTAL_PADDING + 32,
+    gap: 8,
   },
   tabPill: {
     paddingHorizontal: 16,
@@ -1968,9 +1969,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: HORIZONTAL_PADDING,
     paddingBottom: 20,
   },
+  /** Equal vertical space above and below each category title (between grids). */
   section: {
-    marginTop: 8,
-    marginBottom: 6,
+    marginTop: 12,
+    marginBottom: 12,
   },
   emptySectionText: {
     fontSize: 12,
@@ -1982,7 +1984,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: TEXT_WHITE,
-    marginBottom: 6,
   },
   menuRow: {
     flexDirection: 'row',

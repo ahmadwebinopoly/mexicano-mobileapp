@@ -6,6 +6,7 @@ import {
   Pressable,
   Image,
   ScrollView,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
@@ -18,6 +19,7 @@ const CARD_BG = '#152C29';
 const GOLD = '#FECB4D';
 const TEXT_WHITE = '#FFFFFF';
 const MUTED_TEXT = 'rgba(255,255,255,0.7)';
+const SEARCH_BG = '#1F403C';
 const HORIZONTAL_PADDING = 20;
 
 function formatPrice(price: string): string {
@@ -90,12 +92,23 @@ export default function CartScreen() {
                 )}
               </View>
               <View style={styles.cartCardBody}>
-                <Text style={styles.cartCardName} numberOfLines={1}>
-                  {cartItem.name}
-                </Text>
-                <Text style={styles.cartCardPrice}>
-                  {formatPrice(String(getLineTotal(cartItem).toFixed(2)))}
-                </Text>
+                <View style={styles.cartCardTitleRow}>
+                  <Text style={styles.cartCardName} numberOfLines={2}>
+                    {cartItem.name}
+                  </Text>
+                  <Text style={styles.cartCardPrice}>
+                    {formatPrice(String(getLineTotal(cartItem).toFixed(2)))}
+                  </Text>
+                </View>
+                {String(cartItem.instructions ?? '').trim() ? (
+                  <TextInput
+                    editable={false}
+                    multiline
+                    scrollEnabled={false}
+                    value={`Notes: ${String(cartItem.instructions).trim()}`}
+                    style={styles.cartNotesField}
+                  />
+                ) : null}
                 <View style={styles.quantityRow}>
                   {cartItem.quantity <= 1 ? (
                     <Pressable
@@ -235,7 +248,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     borderRadius: 0,
     padding: 12,
-    alignItems: 'center',
+    alignItems: 'flex-start',
   },
   cartGroupCard: {
     backgroundColor: CARD_BG,
@@ -267,12 +280,37 @@ const styles = StyleSheet.create({
   cartCardBody: {
     flex: 1,
     marginLeft: 14,
+    minWidth: 0,
+  },
+  cartCardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 6,
   },
   cartCardName: {
+    flex: 1,
+    minWidth: 0,
     fontSize: 16,
     fontWeight: '700',
     color: TEXT_WHITE,
-    marginBottom: 4,
+  },
+  cartNotesField: {
+    backgroundColor: SEARCH_BG,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 2,
+    marginBottom: 8,
+    minHeight: 44,
+    fontSize: 13,
+    fontWeight: '500',
+    color: TEXT_WHITE,
+    lineHeight: 18,
+    textAlignVertical: 'top',
   },
   addonItemCard: {
     flexDirection: 'row',
@@ -327,7 +365,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: GOLD,
-    marginBottom: 10,
+    flexShrink: 0,
+    marginLeft: 4,
   },
   quantityRow: {
     flexDirection: 'row',

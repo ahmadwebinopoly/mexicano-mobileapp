@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,6 @@ import {
   ScrollView,
   Modal,
   ActivityIndicator,
-  Dimensions,
   TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -39,8 +38,8 @@ const GOLD_MUTED = '#E5B948';
 const TEXT_WHITE = '#FFFFFF';
 
 const HORIZONTAL_PADDING = 20;
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const ADDON_CARD_WIDTH = (SCREEN_WIDTH - HORIZONTAL_PADDING * 2 - 12) / 2;
+/** Match Discover `scrollContent` horizontal inset for add-on grid alignment. */
+const GRID_PADDING = 16;
 const ONBOARDING_ORDER_MODE_KEY = 'onboarding_order_mode';
 type OrderMode = 'delivery' | 'dining' | 'takeaway';
 
@@ -137,6 +136,13 @@ export default function ItemDetailScreen() {
   const { addItem } = useCart();
   const item = route.params?.item;
   const addons: AddonItem[] = (item?.addons ?? []).map(normalizeAddonFromItem);
+  const addonGridRows = useMemo(() => {
+    const rows: { left?: AddonItem; right?: AddonItem }[] = [];
+    for (let i = 0; i < addons.length; i += 2) {
+      rows.push({ left: addons[i], right: addons[i + 1] });
+    }
+    return rows;
+  }, [addons]);
   const [selectedAddonIds, setSelectedAddonIds] = useState<Set<string>>(new Set());
   const [specialInstructions, setSpecialInstructions] = useState('');
   const [instructionsInputHeight, setInstructionsInputHeight] = useState(44);
@@ -392,14 +398,14 @@ export default function ItemDetailScreen() {
         ) : null}
 
         <View style={styles.instructionsSection}>
-          <Text style={styles.instructionsTitle}>Special instructions</Text>
+          <Text style={styles.instructionsTitle}>Notes</Text>
           <TextInput
             value={specialInstructions}
             onChangeText={(v) => {
               setSpecialInstructions(v);
               setItemAdded(false);
             }}
-            placeholder="Add notes for this item (optional)"
+            placeholder="Add Notes"
             placeholderTextColor="rgba(255,255,255,0.45)"
             multiline
             textAlignVertical="top"
@@ -411,35 +417,80 @@ export default function ItemDetailScreen() {
           />
         </View>
 
-        {/* Choose add-ons */}
+        {/* Choose add-ons — same 2-column grid + card height as Discover menu */}
         <View style={styles.addonsSection}>
           <Text style={styles.addonsTitle}>Add-ons</Text>
           {addons.length === 0 ? (
             <Text style={styles.addonsEmpty}>No add-ons for this item</Text>
           ) : (
             <View style={styles.addonsGrid}>
-              {addons.map((addon) => {
-                const img = addon.image;
-                const imageUri = typeof img === 'string' ? img : (img && (img as { uri?: string }).uri) ? (img as { uri: string }).uri : null;
-                const isSelected = selectedAddonIds.has(addon.id);
+              {addonGridRows.map((row, rowIndex) => {
+                const isLastRow = rowIndex === addonGridRows.length - 1;
                 return (
-                  <Pressable
-                    key={addon.id}
-                    onPress={() => toggleAddon(addon.id)}
-                    style={[styles.addonCard, isSelected && styles.addonCardSelected]}
+                  <View
+                    key={`addon-row-${rowIndex}`}
+                    style={[styles.addonGridRow, isLastRow && styles.addonGridRowLast]}
                   >
-                    <View style={styles.addonImageWrap}>
-                      {imageUri ? (
-                        <Image source={{ uri: imageUri }} style={styles.addonImage} resizeMode="cover" />
-                      ) : (
-                        <View style={styles.addonImageSkeleton}>
-                          <MaterialIcons name="image-not-supported" size={22} color="rgba(255,255,255,0.35)" />
-                        </View>
-                      )}
-                    </View>
-                    <Text style={styles.addonName} numberOfLines={2}>{addon.name}</Text>
-                    <Text style={styles.addonPrice}>{formatPrice(addon.price)}</Text>
-                  </Pressable>
+                    {[row.left, row.right].map((addon, col) => {
+                      if (!addon) {
+                        return <View key={`addon-empty-${rowIndex}-${col}`} style={styles.addonGridCell} />;
+                      }
+                      const img = addon.image;
+                      const imageUri =
+                        typeof img === 'string'
+                          ? img.trim()
+                          : img && typeof img === 'object' && (img as { uri?: string }).uri
+                            ? String((img as { uri: string }).uri)
+                            : null;
+                      const isSelected = selectedAddonIds.has(addon.id);
+                      return (
+                        <Pressable
+                          key={addon.id}
+                          onPress={() => toggleAddon(addon.id)}
+                          style={[
+                            styles.addonGridCard,
+                            styles.addonGridCell,
+                            isSelected && styles.addonGridCardSelected,
+                          ]}
+                        >
+                          <View style={styles.addonGridTopRow}>
+                            <View style={styles.addonGridTopSpacer} />
+                            {isSelected ? (
+                              <MaterialIcons name="check-circle" size={18} color={GOLD} />
+                            ) : (
+                              <View style={styles.addonGridTopPlaceholder} />
+                            )}
+                          </View>
+                          <View style={styles.addonGridImageCircle}>
+                            {imageUri ? (
+                              <Image
+                                source={{ uri: imageUri }}
+                                style={styles.addonGridImageCircleImg}
+                                resizeMode="cover"
+                              />
+                            ) : (
+                              <View style={styles.addonGridImageCircleSkeleton}>
+                                <MaterialIcons
+                                  name="image-not-supported"
+                                  size={22}
+                                  color="rgba(255,255,255,0.35)"
+                                />
+                              </View>
+                            )}
+                          </View>
+                          <Text style={styles.addonGridName} numberOfLines={1}>
+                            {addon.name}
+                          </Text>
+                          <View style={styles.addonGridBottomRow}>
+                            <Text style={styles.addonGridPrice}>{formatPrice(addon.price)}</Text>
+                            <View style={styles.addonGridToggleBtn}>
+                              <MaterialIcons name={isSelected ? 'check' : 'add'} size={14} color={BG_DARK} />
+                            </View>
+                          </View>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
                 );
               })}
             </View>
@@ -665,7 +716,7 @@ const styles = StyleSheet.create({
     color: TEXT_WHITE,
   },
   addonsSection: {
-    paddingHorizontal: HORIZONTAL_PADDING,
+    paddingHorizontal: GRID_PADDING,
     paddingTop: 10,
     paddingBottom: 8,
   },
@@ -824,54 +875,106 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   addonsGrid: {
+    width: '100%',
+  },
+  addonGridRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
+    justifyContent: 'space-between',
+    gap: 0,
+    marginBottom: 10,
+    width: '100%',
   },
-  addonCard: {
-    width: ADDON_CARD_WIDTH,
+  addonGridRowLast: {
+    marginBottom: 0,
+  },
+  addonGridCell: {
+    width: '48%',
+  },
+  /** Match Discover `productGridCard` — fixed height + circular image. */
+  addonGridCard: {
     backgroundColor: CARD_BG,
-    borderRadius: 14,
-    padding: 10,
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(229,185,72,0.3)',
+    paddingTop: 12,
+    paddingBottom: 14,
+    paddingHorizontal: 12,
+    height: 248,
     alignItems: 'center',
+    justifyContent: 'flex-start',
   },
-  addonCardSelected: {
+  addonGridCardSelected: {
     borderColor: GOLD,
+    borderWidth: 2,
     backgroundColor: 'rgba(254, 203, 77, 0.08)',
   },
-  addonImageWrap: {
-    width: 56,
-    height: 56,
-    borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    marginBottom: 8,
-  },
-  addonImage: {
+  addonGridTopRow: {
     width: '100%',
-    height: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  addonImageSkeleton: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: CARD_BG,
+  addonGridTopSpacer: {
+    flex: 1,
+  },
+  addonGridTopPlaceholder: {
+    width: 18,
+    height: 18,
+  },
+  addonGridImageCircle: {
+    width: 126,
+    height: 126,
+    borderRadius: 63,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.20)',
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 8,
+    marginBottom: 10,
+    overflow: 'hidden',
   },
-  addonName: {
+  addonGridImageCircleImg: {
+    width: '100%',
+    height: '100%',
+  },
+  addonGridImageCircleSkeleton: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  addonGridName: {
+    width: '100%',
+    textAlign: 'left',
     fontFamily: 'Montserrat_700Bold',
-    fontSize: 12,
+    fontSize: 15,
     fontWeight: '700',
     color: TEXT_WHITE,
-    marginBottom: 4,
-    textAlign: 'center',
+    marginBottom: 6,
   },
-  addonPrice: {
-    fontSize: 13,
+  addonGridBottomRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 2,
+  },
+  addonGridPrice: {
+    fontFamily: 'Montserrat_700Bold',
+    fontSize: 15,
     fontWeight: '700',
     color: GOLD,
+    lineHeight: 18,
+  },
+  addonGridToggleBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: GOLD,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   bottomSpacer: {
     height: 24,

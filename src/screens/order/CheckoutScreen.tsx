@@ -33,6 +33,7 @@ import { navigateToLoginRegister } from '../../navigation/rootNavigationRef';
 
 const BG_DARK = '#0B1D1B';
 const CARD_BG = '#152C29';
+const SEARCH_BG = '#1F403C';
 /** Shared surface for cardholder + Stripe CardField — sits above BG_DARK so fields read as one layer. */
 const STRIPE_FIELD_SURFACE = '#122722';
 const GOLD = '#FECB4D';
@@ -94,7 +95,7 @@ function formatItemsForOrder(items: CartItem[]): string {
       const instruction = String(item.instructions ?? '')
         .replace(/\s+/g, ' ')
         .trim();
-      return `${base} x${item.quantity}${instruction ? ` [Instruction: ${instruction}]` : ''}`;
+      return `${base} x${item.quantity}${instruction ? ` [Notes: ${instruction}]` : ''}`;
     })
     .join(', ');
 }
@@ -164,9 +165,6 @@ export default function CheckoutScreen() {
   const toastOpacity = useRef(new Animated.Value(0)).current;
   const [orderMode, setOrderMode] = useState<OrderMode>(null);
   const [deliveryFee, setDeliveryFee] = useState(0);
-  const [instructionModalVisible, setInstructionModalVisible] = useState(false);
-  const [activeInstructionText, setActiveInstructionText] = useState('');
-  const [activeInstructionItemName, setActiveInstructionItemName] = useState('');
   /** Extra bottom padding while keyboard is open so Stripe CardField + inputs scroll above the keyboard. */
   const [keyboardBottomInset, setKeyboardBottomInset] = useState(0);
 
@@ -319,14 +317,6 @@ export default function CheckoutScreen() {
       setDiscountApplying(false);
     }
   };
-
-  const openInstructionModal = React.useCallback((itemName: string, instructions: string) => {
-    const text = String(instructions ?? '').trim();
-    if (!text) return;
-    setActiveInstructionItemName(itemName);
-    setActiveInstructionText(text);
-    setInstructionModalVisible(true);
-  }, []);
 
   const ensureStripeIsReady = async () => {
     if (stripeReady) return;
@@ -587,22 +577,22 @@ export default function CheckoutScreen() {
                       <Text style={styles.cartRowName} numberOfLines={2}>
                         {cartItem.name}
                       </Text>
-                      {String(cartItem.instructions ?? '').trim() ? (
-                        <Pressable
-                          style={styles.itemInstructionBtn}
-                          onPress={() =>
-                            openInstructionModal(
-                              cartItem.name,
-                              String(cartItem.instructions ?? '')
-                            )
-                          }
-                          hitSlop={6}
-                          accessibilityLabel={`View instructions for ${cartItem.name}`}
-                        >
-                          <Ionicons name="document-text-outline" size={16} color={GOLD} />
-                        </Pressable>
-                      ) : null}
+                      <View style={styles.cartRowPriceBlock}>
+                        <Text style={styles.cartRowPrice}>
+                          {formatPrice(String(getLineTotal(cartItem).toFixed(2)))}
+                        </Text>
+                        <Text style={styles.qtyReadonly}>×{cartItem.quantity}</Text>
+                      </View>
                     </View>
+                    {String(cartItem.instructions ?? '').trim() ? (
+                      <TextInput
+                        editable={false}
+                        multiline
+                        scrollEnabled={false}
+                        value={`Notes: ${String(cartItem.instructions).trim()}`}
+                        style={styles.cartNotesField}
+                      />
+                    ) : null}
                     {Array.isArray(cartItem.addons) && cartItem.addons.length > 0 ? (
                       <View style={styles.cartAddonList}>
                         {cartItem.addons.map((addon) => (
@@ -633,12 +623,6 @@ export default function CheckoutScreen() {
                         ))}
                       </View>
                     ) : null}
-                    <View style={styles.cartRowBottom}>
-                      <Text style={styles.cartRowPrice}>
-                        {formatPrice(String(getLineTotal(cartItem).toFixed(2)))}
-                      </Text>
-                      <Text style={styles.qtyReadonly}>×{cartItem.quantity}</Text>
-                    </View>
                   </View>
                 </View>
               ))}
@@ -900,39 +884,6 @@ export default function CheckoutScreen() {
         </Modal>
       )}
 
-      <Modal
-        visible={instructionModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setInstructionModalVisible(false)}
-      >
-        <SafeAreaView style={styles.instructionBackdrop} edges={['top', 'bottom', 'left', 'right']}>
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={() => setInstructionModalVisible(false)}
-          />
-          <Pressable
-            style={styles.instructionCard}
-            onPress={(e) => e.stopPropagation()}
-          >
-            <View style={styles.instructionHeader}>
-              <Text style={styles.instructionTitle}>Special Instructions</Text>
-              <Pressable
-                style={styles.instructionCloseBtn}
-                onPress={() => setInstructionModalVisible(false)}
-                hitSlop={8}
-              >
-                <Ionicons name="close" size={18} color={TEXT_WHITE} />
-              </Pressable>
-            </View>
-            <Text style={styles.instructionItemName} numberOfLines={1}>
-              {activeInstructionItemName}
-            </Text>
-            <Text style={styles.instructionBody}>{activeInstructionText}</Text>
-          </Pressable>
-        </SafeAreaView>
-      </Modal>
-
       {toast ? (
         <Animated.View
           pointerEvents="none"
@@ -1037,53 +988,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: BG_DARK,
-  },
-  instructionBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(11,29,27,0.8)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-  },
-  instructionCard: {
-    width: '100%',
-    maxWidth: 360,
-    backgroundColor: CARD_BG,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(254,203,77,0.22)',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-  },
-  instructionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  instructionTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: TEXT_WHITE,
-  },
-  instructionCloseBtn: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  instructionItemName: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: GOLD,
-    marginBottom: 8,
-  },
-  instructionBody: {
-    fontSize: 14,
-    lineHeight: 20,
-    color: TEXT_WHITE,
   },
   loginRequiredBtnPressed: {
     opacity: 0.85,
@@ -1210,7 +1114,7 @@ const styles = StyleSheet.create({
   },
   cartRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
@@ -1238,34 +1142,47 @@ const styles = StyleSheet.create({
   cartRowBody: {
     flex: 1,
     marginLeft: 12,
+    minWidth: 0,
   },
   cartRowTitleRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
-    gap: 8,
+    gap: 10,
+    marginBottom: 6,
   },
   cartRowName: {
+    flex: 1,
+    minWidth: 0,
     fontSize: 15,
     fontWeight: '600',
     color: TEXT_WHITE,
-    marginBottom: 4,
-    flex: 1,
-    minWidth: 0,
   },
-  itemInstructionBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+  cartRowPriceBlock: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(254,203,77,0.12)',
+    gap: 8,
+    flexShrink: 0,
+  },
+  cartNotesField: {
+    backgroundColor: SEARCH_BG,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(254,203,77,0.3)',
+    borderColor: 'rgba(255,255,255,0.14)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 8,
+    minHeight: 44,
+    fontSize: 13,
+    fontWeight: '500',
+    color: TEXT_WHITE,
+    lineHeight: 18,
+    textAlignVertical: 'top',
   },
   cartAddonList: {
     gap: 6,
-    marginBottom: 4,
+    marginTop: 0,
+    marginBottom: 0,
   },
   cartAddonRow: {
     flexDirection: 'row',
@@ -1314,12 +1231,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: MUTED_TEXT,
-  },
-  cartRowBottom: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 4,
   },
   cartRowPrice: {
     fontSize: 14,
