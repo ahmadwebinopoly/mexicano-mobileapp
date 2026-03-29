@@ -10,6 +10,7 @@ import ContactScreen from '../screens/extra/ContactScreen';
 import StoryScreen from '../screens/extra/StoryScreen';
 import ProfileScreen from '../screens/main/ProfileScreen';
 import { startOrdersPolling, stopOrdersPolling, type Order } from '../api/myorder';
+import { parseOrderItemLines } from '../api/discoverScreen';
 import { getToken } from '../storagetank';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -72,19 +73,6 @@ function trackerIconForOrderType(type: string | undefined): React.ComponentProps
   if (t.includes('deliver')) return 'bicycle-outline';
   if (t.includes('dine')) return 'restaurant-outline';
   return 'bag-handle-outline';
-}
-
-function splitOrderItems(items: string | undefined): string[] {
-  if (!items || !items.trim()) return [];
-  return items
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-function firstOrderItem(items: string | undefined): string {
-  const parts = splitOrderItems(items);
-  return parts[0] || 'Your order';
 }
 
 const TRACK_STEPS: { key: string; label: string }[] = [
@@ -340,10 +328,10 @@ const styles = StyleSheet.create({
   },
   itemSingleRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingVertical: 10,
   },
   itemSingleRowPressable: {
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -352,6 +340,17 @@ const styles = StyleSheet.create({
   itemLeftWrap: {
     flex: 1,
     marginRight: 10,
+    gap: 10,
+  },
+  modalOrderLineBlock: {
+    width: '100%',
+  },
+  modalItemInstruction: {
+    marginTop: 4,
+    fontSize: 11,
+    fontWeight: '600',
+    color: MUTED_TEXT,
+    lineHeight: 15,
   },
   itemText: {
     color: TEXT_WHITE,
@@ -548,7 +547,7 @@ export default function MainTabNavigator() {
     if (normalizeStatus(activeOrder.status).includes('ready')) return 'Ready now';
     return 'Order in process';
   }, [activeOrder, isCancelled]);
-  const orderItemLines = useMemo(() => splitOrderItems(activeOrder?.items), [activeOrder?.items]);
+  const modalOrderLines = useMemo(() => parseOrderItemLines(activeOrder?.items || ''), [activeOrder?.items]);
   const trackerIconName = useMemo(
     () => trackerIconForOrderType(activeOrder?.type),
     [activeOrder?.type]
@@ -726,37 +725,55 @@ export default function MainTabNavigator() {
             <View style={styles.itemsPanel}>
               <View style={styles.itemsPanelHeader}>
                 <Text style={styles.itemsPanelHeaderText}>
-                  {activeOrders.length > 1 ? `Orders in progress (${activeOrders.length})` : 'Order Item'}
+                  {activeOrders.length > 1
+                    ? `Orders in progress (${activeOrders.length})`
+                    : modalOrderLines.length > 1
+                      ? `Order items (${modalOrderLines.length})`
+                      : 'Order item'}
                 </Text>
               </View>
-              {activeOrders.map((order, idx) => (
-                <View key={order.id} style={[styles.itemSingleRow, idx > 0 && styles.itemSingleRowPressable]}>
-                  <View style={styles.itemLeftWrap}>
-                    <Text style={styles.itemText} numberOfLines={1}>
-                      {firstOrderItem(order.items)}
-                    </Text>
-                    <Text style={styles.modalItems}>Order ##{order.id}</Text>
+              {activeOrders.map((order, idx) => {
+                const lines = parseOrderItemLines(order.items || '');
+                return (
+                  <View key={order.id} style={[styles.itemSingleRow, idx > 0 && styles.itemSingleRowPressable]}>
+                    <View style={styles.itemLeftWrap}>
+                      {lines.map((line, li) => (
+                        <View key={`${order.id}-line-${li}`} style={styles.modalOrderLineBlock}>
+                          <Text style={styles.itemText} numberOfLines={3}>
+                            {line.title} ×{line.quantity}
+                          </Text>
+                          {line.instruction ? (
+                            <Text style={styles.modalItemInstruction} numberOfLines={3}>
+                              Instruction: {line.instruction}
+                            </Text>
+                          ) : null}
+                        </View>
+                      ))}
+                      <Text style={styles.modalItems}>Order #{order.id}</Text>
+                    </View>
+                    <View style={styles.itemRightWrap}>
+                      <Text style={styles.itemPrice}>{order.amount || '—'}</Text>
+                      <Pressable
+                        style={styles.itemViewBtn}
+                        onPress={() => {
+                          setTrackingOpen(false);
+                          navigation.navigate('ViewOrderDetails', { orderId: String(order.id) });
+                        }}
+                      >
+                        <Text style={styles.itemViewBtnText}>Details</Text>
+                        <Ionicons name="chevron-forward" size={14} color={GOLD} />
+                      </Pressable>
+                    </View>
                   </View>
-                  <View style={styles.itemRightWrap}>
-                    <Text style={styles.itemPrice}>{order.amount || '—'}</Text>
-                    <Pressable
-                      style={styles.itemViewBtn}
-                      onPress={() => {
-                        setTrackingOpen(false);
-                        navigation.navigate('ViewOrderDetails', { orderId: String(order.id) });
-                      }}
-                    >
-                      <Text style={styles.itemViewBtnText}>Details</Text>
-                      <Ionicons name="chevron-forward" size={14} color={GOLD} />
-                    </Pressable>
-                  </View>
-                </View>
-              ))}
+                );
+              })}
               {activeOrders.length === 0 ? (
                 <View style={styles.itemSingleRow}>
                   <View style={styles.itemLeftWrap}>
-                    <Text style={styles.itemText} numberOfLines={2}>
-                      {(orderItemLines.length > 0 ? orderItemLines.join(', ') : activeOrder?.items) || 'Your order'}
+                    <Text style={styles.itemText} numberOfLines={4}>
+                      {(modalOrderLines.length > 0
+                        ? modalOrderLines.map((l) => `${l.title} ×${l.quantity}`).join(', ')
+                        : activeOrder?.items) || 'Your order'}
                     </Text>
                   </View>
                   <Text style={styles.itemPrice}>{activeOrder?.amount || '—'}</Text>

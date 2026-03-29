@@ -14,7 +14,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { submitReview } from '../../api/review';
-import { getMenuItems } from '../../api/discoverScreen';
+import { getMenuItems, type MenuItem } from '../../api/discoverScreen';
+import { parseOrderItemLines } from '../../utils/orderItemsSummary';
 
 const BG = '#0B1D1B';
 const CARD = '#152C29';
@@ -52,16 +53,33 @@ function modeTags(mode: ReviewMode): string[] {
   return ['Ready on Time', 'Well Packed', 'Flavorful'];
 }
 
-function extractPrimaryDishName(itemsSummary: string): string {
-  const raw = String(itemsSummary ?? '').trim();
-  if (!raw) return '';
-  const first = raw.split(',')[0]?.trim() ?? '';
-  return first
-    .replace(/\(.*?\)/g, ' ')
-    .replace(/\[.*?\]/g, ' ')
-    .replace(/\s*x\d+\b/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+function baseProductNameFromOrderLine(title: string): string {
+  const t = title.trim();
+  const idx = t.indexOf(' (');
+  if (idx === -1) return t;
+  return t.slice(0, idx).trim();
+}
+
+function resolveMenuImageUri(menuItems: MenuItem[], lineTitle: string): string {
+  const full = lineTitle.trim().toLowerCase();
+  const base = baseProductNameFromOrderLine(lineTitle).trim().toLowerCase();
+  for (const m of menuItems) {
+    const n = String(m.name ?? '').trim().toLowerCase();
+    if (n === full || n === base) {
+      const raw = m.image;
+      if (typeof raw === 'string' && raw.trim()) return raw.trim();
+      if (raw && typeof raw === 'object' && 'uri' in raw && typeof (raw as { uri?: unknown }).uri === 'string') {
+        return String((raw as { uri: string }).uri).trim();
+      }
+    }
+  }
+  return '';
+}
+
+function aggregateDishRating(ratings: number[]): number {
+  if (ratings.length === 0) return 0;
+  const avg = ratings.reduce((s, r) => s + r, 0) / ratings.length;
+  return Math.max(1, Math.min(5, Math.round(avg)));
 }
 
 function StarPicker({
@@ -101,13 +119,14 @@ export default function RateYourFeastScreen() {
   const labels = useMemo(() => modeExperienceLabels(mode), [mode]);
   const tags = useMemo(() => modeTags(mode), [mode]);
 
-  const [dishRating, setDishRating] = useState(0);
-  const [tagSelected, setTagSelected] = useState<string | null>(null);
+  const [lineRatings, setLineRatings] = useState<number[]>([]);
+  /** Per dish line: multiple tag labels can be selected */
+  const [lineTags, setLineTags] = useState<string[][]>([]);
   const [comment, setComment] = useState('');
   const [commentInputHeight, setCommentInputHeight] = useState(92);
   const [submitting, setSubmitting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [dishImageUri, setDishImageUri] = useState<string>('');
+  const [menuCatalog, setMenuCatalog] = useState<MenuItem[]>([]);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [experienceRatings, setExperienceRatings] = useState<Record<string, number>>({
     a: 0,
@@ -117,8 +136,6 @@ export default function RateYourFeastScreen() {
 
   useEffect(() => {
     setExperienceRatings({ a: 0, b: 0, c: 0 });
-    setTagSelected(null);
-    setDishRating(0);
   }, [mode]);
 
   useEffect(() => {
@@ -129,44 +146,51 @@ export default function RateYourFeastScreen() {
     };
   }, []);
 
-  const titleLine = items?.trim() || 'AI Pastor Tacos (3)';
-  const primaryDishName = useMemo(() => extractPrimaryDishName(items), [items]);
+  const parsedLines = useMemo(() => parseOrderItemLines(items || ''), [items]);
+
+  const lineImageUris = useMemo(
+    () => parsedLines.map((line) => resolveMenuImageUri(menuCatalog, line.title)),
+    [parsedLines, menuCatalog]
+  );
+
   const reviewOrderType = useMemo<'Delivery' | 'Pickup' | 'Dine In'>(() => {
     if (mode === 'delivery') return 'Delivery';
     if (mode === 'dining') return 'Dine In';
     return 'Pickup';
   }, [mode]);
 
-  const canSubmit = dishRating > 0 && experienceRatings.a > 0 && experienceRatings.b > 0 && experienceRatings.c > 0 && !!orderId?.trim();
+  useEffect(() => {
+    const n = parsedLines.length;
+    setLineRatings(Array.from({ length: n }, () => 0));
+    setLineTags(Array.from({ length: n }, () => []));
+  }, [items]);
+
+  const allDishLinesRated =
+    parsedLines.length > 0 &&
+    lineRatings.length === parsedLines.length &&
+    parsedLines.every((_, i) => (lineRatings[i] ?? 0) > 0);
+
+  const canSubmit =
+    allDishLinesRated &&
+    experienceRatings.a > 0 &&
+    experienceRatings.b > 0 &&
+    experienceRatings.c > 0 &&
+    !!orderId?.trim();
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    void (async () => {
       try {
-        if (!primaryDishName) {
-          if (!cancelled) setDishImageUri('');
-          return;
-        }
-        const menuItems = await getMenuItems();
-        if (cancelled) return;
-        const target = primaryDishName.trim().toLowerCase();
-        const found = menuItems.find((m) => String(m.name ?? '').trim().toLowerCase() === target);
-        const imageRaw = found?.image;
-        const uri =
-          typeof imageRaw === 'string'
-            ? imageRaw.trim()
-            : imageRaw && typeof imageRaw === 'object' && 'uri' in imageRaw && typeof (imageRaw as { uri?: unknown }).uri === 'string'
-              ? String((imageRaw as { uri: string }).uri).trim()
-              : '';
-        setDishImageUri(uri);
+        const list = await getMenuItems();
+        if (!cancelled) setMenuCatalog(list);
       } catch {
-        if (!cancelled) setDishImageUri('');
+        if (!cancelled) setMenuCatalog([]);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [primaryDishName]);
+  }, []);
 
   const handleSubmit = async () => {
     if (!orderId?.trim()) {
@@ -199,11 +223,14 @@ export default function RateYourFeastScreen() {
 
     try {
       setSubmitting(true);
+      const dishRating = aggregateDishRating(lineRatings);
+      const allSelectedTags = Array.from(new Set(lineTags.flat().filter(Boolean)));
+      const dishTag = allSelectedTags.length > 0 ? allSelectedTags.join(', ') : undefined;
       const res = await submitReview({
         orderId: String(orderId),
         orderType: reviewOrderType,
         dishRating,
-        dishTag: tagSelected ?? undefined,
+        dishTag,
         comment: comment.trim() || undefined,
         experience,
       });
@@ -223,114 +250,164 @@ export default function RateYourFeastScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom', 'left', 'right']}>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          {/* Header */}
-          <View style={styles.topBar}>
-            <Pressable onPress={() => navigation.goBack()} hitSlop={10}>
-              <Ionicons name="arrow-back" size={24} color={TEXT} />
-            </Pressable>
-            <Text style={styles.screenTitle} numberOfLines={1}>
-              Rate Your Feast
-            </Text>
-            <Text style={styles.brandMark}>MEXICANO</Text>
-          </View>
+        {/* Header */}
+        <View style={styles.topBar}>
+          <Pressable onPress={() => navigation.goBack()} hitSlop={10}>
+            <Ionicons name="arrow-back" size={24} color={TEXT} />
+          </Pressable>
+          <Text style={styles.screenTitle} numberOfLines={1}>
+            Rate Your Feast
+          </Text>
+          <Text style={styles.brandMark}>MEXICANO</Text>
+        </View>
 
-          <Text style={styles.sectionHeading}>How was the experience?</Text>
-          <View style={styles.experienceCard}>
-            <View style={styles.experienceRow}>
-              <Text style={styles.experienceLabel}>{labels[0]}</Text>
-              <StarPicker
-                value={experienceRatings.a}
-                onChange={(n) => setExperienceRatings((prev) => ({ ...prev, a: n }))}
-              />
-            </View>
-            <View style={styles.experienceRow}>
-              <Text style={styles.experienceLabel}>{labels[1]}</Text>
-              <StarPicker
-                value={experienceRatings.b}
-                onChange={(n) => setExperienceRatings((prev) => ({ ...prev, b: n }))}
-              />
-            </View>
-            <View style={styles.experienceRow}>
-              <Text style={styles.experienceLabel}>{labels[2]}</Text>
-              <StarPicker
-                value={experienceRatings.c}
-                onChange={(n) => setExperienceRatings((prev) => ({ ...prev, c: n }))}
-              />
-            </View>
-          </View>
-
-          <View style={styles.rateDishHeader}>
-            <MaterialCommunityIcons name="silverware-fork-knife" size={20} color={GOLD} />
-            <Text style={styles.rateDishTitle}>Rate Your Dishes</Text>
-          </View>
-
-          <View style={styles.dishCard}>
-            <View style={styles.dishTopRow}>
-              <View style={styles.dishThumbWrap}>
-                {dishImageUri ? (
-                  <Image source={{ uri: dishImageUri }} style={styles.dishThumb} resizeMode="cover" />
-                ) : (
-                  <View style={styles.dishThumbFallback}>
-                    <Ionicons name="image-outline" size={20} color={MUTED} />
-                  </View>
-                )}
-              </View>
-              <View style={styles.dishContent}>
-                <Text style={styles.dishName} numberOfLines={1}>{titleLine}</Text>
-                <StarPicker value={dishRating} onChange={setDishRating} size={30} gap={7} />
-              </View>
-            </View>
-
-            <View style={styles.tagRow}>
-              {tags.map((tag) => {
-                const active = tagSelected === tag;
-                return (
-                  <Pressable
-                    key={tag}
-                    onPress={() => setTagSelected(active ? null : tag)}
-                    style={[styles.tagChip, active && styles.tagChipActive]}
-                  >
-                    <Text style={[styles.tagText, active && styles.tagTextActive]}>{tag}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
-
-          <View style={styles.commentWrap}>
-            <Text style={styles.commentLabel}>Comment (optional)</Text>
-            <TextInput
-              value={comment}
-              onChangeText={setComment}
-              placeholder="Share your experience..."
-              placeholderTextColor="rgba(255,255,255,0.45)"
-              multiline
-              textAlignVertical="top"
-              style={[styles.commentInput, { height: commentInputHeight }]}
-              onContentSizeChange={(e) => {
-                const next = Math.max(92, Math.min(180, Math.ceil(e.nativeEvent.contentSize.height) + 20));
-                setCommentInputHeight(next);
-              }}
+        <Text style={styles.sectionHeading}>How was the experience?</Text>
+        <View style={styles.experienceCard}>
+          <View style={styles.experienceRow}>
+            <Text style={styles.experienceLabel}>{labels[0]}</Text>
+            <StarPicker
+              value={experienceRatings.a}
+              onChange={(n) => setExperienceRatings((prev) => ({ ...prev, a: n }))}
             />
           </View>
+          <View style={styles.experienceRow}>
+            <Text style={styles.experienceLabel}>{labels[1]}</Text>
+            <StarPicker
+              value={experienceRatings.b}
+              onChange={(n) => setExperienceRatings((prev) => ({ ...prev, b: n }))}
+            />
+          </View>
+          <View style={styles.experienceRow}>
+            <Text style={styles.experienceLabel}>{labels[2]}</Text>
+            <StarPicker
+              value={experienceRatings.c}
+              onChange={(n) => setExperienceRatings((prev) => ({ ...prev, c: n }))}
+            />
+          </View>
+        </View>
 
-          <Pressable
-            style={[styles.submitBtn, (!canSubmit || submitting) && styles.submitBtnDisabled]}
-            onPress={handleSubmit}
-            disabled={!canSubmit || submitting}
-          >
-            {submitting ? (
-              <ActivityIndicator size="small" color={BG} />
-            ) : (
-              <Text style={styles.submitBtnText}>Submit review</Text>
-            )}
-          </Pressable>
+        <View style={styles.rateDishHeader}>
+          <MaterialCommunityIcons name="silverware-fork-knife" size={20} color={GOLD} />
+          <Text style={styles.rateDishTitle}>Rate Your Dishes</Text>
+        </View>
 
-          {toastMessage ? (
-            <View style={styles.toast}>
-              <Text style={styles.toastText}>{toastMessage}</Text>
+        {parsedLines.length === 0 ? (
+          <Text style={styles.dishEmptyHint}>No order items to rate.</Text>
+        ) : null}
+
+        {parsedLines.map((line, idx) => {
+          const uri = lineImageUris[idx] || '';
+          const rating = lineRatings[idx] ?? 0;
+          const selectedForLine = lineTags[idx] ?? [];
+          return (
+            <View
+              key={`dish-${idx}-${String(line.title).slice(0, 32)}`}
+              style={[
+                styles.dishCard,
+                idx < parsedLines.length - 1 ? styles.dishCardSpaced : styles.dishCardLast,
+              ]}
+            >
+              <View style={styles.dishTopRow}>
+                <View style={styles.dishThumbWrap}>
+                  {uri ? (
+                    <Image source={{ uri }} style={styles.dishThumb} resizeMode="cover" />
+                  ) : (
+                    <View style={styles.dishThumbFallback}>
+                      <Ionicons name="image-outline" size={20} color={MUTED} />
+                    </View>
+                  )}
+                </View>
+                <View style={styles.dishContent}>
+                  <Text style={styles.dishName} numberOfLines={3}>
+                    {line.title}
+                    <Text style={styles.dishQtyText}>
+                      {' '}
+                      ×{line.quantity}
+                    </Text>
+                  </Text>
+                  {line.instruction ? (
+                    <Text style={styles.dishInstructionLine} numberOfLines={4}>
+                      <Text style={styles.dishInstructionLabel}>Instruction: </Text>
+                      <Text style={styles.dishInstructionValue}>{line.instruction}</Text>
+                    </Text>
+                  ) : null}
+                  <StarPicker
+                    value={rating}
+                    onChange={(n) =>
+                      setLineRatings((prev) => {
+                        const next = [...prev];
+                        next[idx] = n;
+                        return next;
+                      })
+                    }
+                    size={28}
+                    gap={6}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.tagRow}>
+                {tags.map((tag) => {
+                  const active = selectedForLine.includes(tag);
+                  return (
+                    <Pressable
+                      key={`${idx}-${tag}`}
+                      onPress={() =>
+                        setLineTags((prev) => {
+                          const next = [...prev];
+                          const row = [...(next[idx] ?? [])];
+                          const pos = row.indexOf(tag);
+                          if (pos >= 0) row.splice(pos, 1);
+                          else row.push(tag);
+                          next[idx] = row;
+                          return next;
+                        })
+                      }
+                      style={[styles.tagChip, active && styles.tagChipActive]}
+                    >
+                      <Text style={[styles.tagText, active && styles.tagTextActive]}>{tag}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
             </View>
-          ) : null}
+          );
+        })}
+
+        <View style={styles.commentWrap}>
+          <Text style={styles.commentLabel}>Comment (optional)</Text>
+          <TextInput
+            value={comment}
+            onChangeText={setComment}
+            placeholder="Share your experience..."
+            placeholderTextColor="rgba(255,255,255,0.45)"
+            multiline
+            textAlignVertical="top"
+            style={[styles.commentInput, { height: commentInputHeight }]}
+            onContentSizeChange={(e) => {
+              const next = Math.max(92, Math.min(180, Math.ceil(e.nativeEvent.contentSize.height) + 20));
+              setCommentInputHeight(next);
+            }}
+          />
+        </View>
+
+        <Pressable
+          style={[styles.submitBtn, (!canSubmit || submitting) && styles.submitBtnDisabled]}
+          onPress={handleSubmit}
+          disabled={!canSubmit || submitting}
+        >
+          {submitting ? (
+            <ActivityIndicator size="small" color={BG} />
+          ) : (
+            <Text style={styles.submitBtnText}>Submit review</Text>
+          )}
+        </Pressable>
+
+        {toastMessage ? (
+          <View style={styles.toast}>
+            <Text style={styles.toastText}>{toastMessage}</Text>
+          </View>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -405,17 +482,28 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: TEXT,
   },
+  dishEmptyHint: {
+    fontSize: 13,
+    color: MUTED,
+    marginBottom: 16,
+  },
   dishCard: {
     backgroundColor: CARD,
     borderRadius: 16,
     padding: 14,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
+    marginBottom: 0,
+  },
+  dishCardSpaced: {
+    marginBottom: 14,
+  },
+  dishCardLast: {
     marginBottom: 22,
   },
   dishTopRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 14,
   },
   dishThumbWrap: {
@@ -446,8 +534,26 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: TEXT,
   },
+  dishQtyText: {
+    fontWeight: '800',
+    color: GOLD,
+  },
+  dishInstructionLine: {
+    marginTop: 6,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  dishInstructionLabel: {
+    fontWeight: '700',
+    color: GOLD,
+  },
+  dishInstructionValue: {
+    fontWeight: '500',
+    color: MUTED,
+  },
   tagRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
   },
   tagChip: {

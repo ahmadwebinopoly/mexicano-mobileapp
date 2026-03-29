@@ -80,3 +80,6 @@ export async function getDiscoverBanners(): Promise<DiscoverBanner[]> {
   // TODO: replace with the real banners endpoint when you share it.
   return [];
 }
+
+/** Order summary string parser (same format as checkout `items` payload) — used by order tracker modal & order details. */
+export { parseOrderItemLines, type ParsedOrderLine } from '../utils/orderItemsSummary';

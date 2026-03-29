@@ -281,11 +281,17 @@ export default function AddressScreen() {
       return;
     }
 
+    const lat = addLatitude;
+    const lng = addLongitude;
+    if (lat == null || lng == null) {
+      return;
+    }
+
     try {
       setSavingNew(true);
       await saveAddress({
-        latitude: addLatitude,
-        longitude: addLongitude,
+        latitude: lat,
+        longitude: lng,
         address: addAddress.trim(),
         customerLocation: addLabel.trim() || 'Home',
         city: addCity.trim() || undefined,

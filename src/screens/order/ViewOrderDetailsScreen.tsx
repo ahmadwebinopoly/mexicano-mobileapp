@@ -17,7 +17,8 @@ const WebView = require('react-native-webview').WebView;
 import { getNetworkErrorMessage } from '../../api/apiConfig';
 import { getVisit, type VisitLocation } from '../../api/content';
 import { getReviewByOrderId } from '../../api/review';
-import { getMenuItems } from '../../api/discoverScreen';
+import { getMenuItems, type MenuItem } from '../../api/discoverScreen';
+import { type ParsedOrderLine, parseOrderItemLines } from '../../utils/orderItemsSummary';
 import {
   getMyOrders,
   type MyOrdersResponse,
@@ -186,23 +187,78 @@ const FIVE_STATUS_STEPS: { key: string; label: string }[] = [
 
 const CANCELLED_STEP: { key: string; label: string } = { key: 'cancelled', label: 'Cancelled' };
 
-function splitItemsSummary(items: string): string[] {
-  if (!items || !items.trim()) return [];
-  return items
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+function baseProductNameFromOrderLine(title: string): string {
+  const t = title.trim();
+  const idx = t.indexOf(' (');
+  if (idx === -1) return t;
+  return t.slice(0, idx).trim();
 }
 
-function extractPrimaryOrderItemName(itemsSummary: string): string {
-  const first = String(itemsSummary ?? '').split(',')[0]?.trim() ?? '';
-  if (!first) return '';
-  return first
-    .replace(/\(.*?\)/g, ' ')
-    .replace(/\[.*?\]/g, ' ')
-    .replace(/\s*x\d+\b/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+function extractMenuImageUri(raw: unknown): string {
+  if (typeof raw === 'string' && raw.trim()) return raw.trim();
+  if (raw && typeof raw === 'object' && 'uri' in raw && typeof (raw as { uri?: unknown }).uri === 'string') {
+    return String((raw as { uri: string }).uri).trim();
+  }
+  return '';
+}
+
+function findMenuItemForOrderLine(menuItems: MenuItem[], lineTitle: string): MenuItem | null {
+  const full = lineTitle.trim().toLowerCase();
+  const base = baseProductNameFromOrderLine(lineTitle).trim().toLowerCase();
+  for (const m of menuItems) {
+    const n = String(m.name ?? '').trim().toLowerCase();
+    if (n === full || n === base) return m;
+  }
+  return null;
+}
+
+function resolveMenuImageUri(menuItems: MenuItem[], lineTitle: string): string {
+  const m = findMenuItemForOrderLine(menuItems, lineTitle);
+  return m ? extractMenuImageUri(m.image) : '';
+}
+
+function parsePriceToNumber(p: unknown): number {
+  if (p == null) return 0;
+  const n = parseFloat(String(p).replace(/[$,]/g, ''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Addon names from checkout string: `Product (A, B)` → ["A","B"] */
+function extractAddonNamesFromOrderTitle(beforeQty: string): string[] {
+  const t = beforeQty.trim();
+  const open = t.indexOf(' (');
+  if (open === -1) return [];
+  const close = t.indexOf(')', open + 1);
+  if (close === -1) return [];
+  const inner = t.slice(open + 2, close).trim();
+  if (!inner) return [];
+  return inner.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+function computeLineItemsTotal(menuItem: MenuItem, lineTitle: string, quantity: number): number {
+  let unit = parsePriceToNumber(menuItem.price);
+  const wants = extractAddonNamesFromOrderTitle(lineTitle);
+  const rawAddons = Array.isArray(menuItem.addons) ? menuItem.addons : [];
+  for (const want of wants) {
+    const w = want.trim().toLowerCase();
+    const found = rawAddons.find((a) => {
+      const rec = a as { name?: unknown; title?: unknown };
+      const n = String(rec.name ?? rec.title ?? '').trim().toLowerCase();
+      return n === w;
+    }) as { price?: unknown } | undefined;
+    if (found) unit += parsePriceToNumber(found.price);
+  }
+  return unit * Math.max(1, quantity);
+}
+
+function computeLineTotal(menuItems: MenuItem[], line: ParsedOrderLine): number | null {
+  const mi = findMenuItemForOrderLine(menuItems, line.title);
+  if (!mi) return null;
+  return computeLineItemsTotal(mi, line.title, line.quantity);
+}
+
+function formatMoney(n: number): string {
+  return `$${n.toFixed(2)}`;
 }
 
 function buildMapHtml(embedUrl: string): string {
@@ -345,7 +401,7 @@ export default function ViewOrderDetailsScreen() {
   const [savedDefaultAddress, setSavedDefaultAddress] = useState<Address | null>(null);
   const [reviewAlreadyExists, setReviewAlreadyExists] = useState(false);
   const [checkingExistingReview, setCheckingExistingReview] = useState(false);
-  const [orderItemImageUri, setOrderItemImageUri] = useState('');
+  const [menuCatalog, setMenuCatalog] = useState<MenuItem[]>([]);
 
   const statusColor = useMemo(() => getStatusColor(order?.status), [order?.status]);
   const delivery = order ? isDeliveryOrder(order) : true;
@@ -399,6 +455,18 @@ export default function ViewOrderDetailsScreen() {
 
   const mapHtml = useMemo(() => buildMapHtml(mapEmbedUrl), [mapEmbedUrl]);
 
+  const parsedOrderLines = useMemo(() => parseOrderItemLines(order?.items || ''), [order?.items]);
+
+  const lineImageUris = useMemo(
+    () => parsedOrderLines.map((line) => resolveMenuImageUri(menuCatalog, line.title)),
+    [parsedOrderLines, menuCatalog]
+  );
+
+  const lineTotals = useMemo(
+    () => parsedOrderLines.map((line) => computeLineTotal(menuCatalog, line)),
+    [parsedOrderLines, menuCatalog]
+  );
+
   useEffect(() => {
     let mounted = true;
     void (async () => {
@@ -432,39 +500,24 @@ export default function ViewOrderDetailsScreen() {
       })();
       return () => {
         cancelled = true;
-      };
-    }, [order?.id, order?.type])
+    };
+  }, [order?.id, order?.type])
   );
 
   useEffect(() => {
     let active = true;
-    (async () => {
+    void (async () => {
       try {
-        const primaryName = extractPrimaryOrderItemName(order?.items || '');
-        if (!primaryName) {
-          if (active) setOrderItemImageUri('');
-          return;
-        }
-        const menuItems = await getMenuItems();
-        if (!active) return;
-        const target = primaryName.trim().toLowerCase();
-        const found = menuItems.find((m) => String(m.name ?? '').trim().toLowerCase() === target);
-        const raw = found?.image;
-        const uri =
-          typeof raw === 'string'
-            ? raw.trim()
-            : raw && typeof raw === 'object' && 'uri' in raw && typeof (raw as { uri?: unknown }).uri === 'string'
-              ? String((raw as { uri: string }).uri).trim()
-              : '';
-        setOrderItemImageUri(uri);
+        const items = await getMenuItems();
+        if (active) setMenuCatalog(items);
       } catch {
-        if (active) setOrderItemImageUri('');
+        if (active) setMenuCatalog([]);
       }
     })();
     return () => {
       active = false;
     };
-  }, [order?.items]);
+  }, []);
 
   const findOrderInResponse = useCallback(
     (data: MyOrdersResponse): Order | null => {
@@ -619,8 +672,6 @@ export default function ViewOrderDetailsScreen() {
     );
   }
 
-  const itemLines = splitItemsSummary(order.items || '');
-
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -648,48 +699,66 @@ export default function ViewOrderDetailsScreen() {
         {/* Order summary — directly under placed time */}
         <View style={styles.cardCompact}>
           <Text style={styles.sectionTitle}>Order summary</Text>
-          <View style={styles.summaryHeroRow}>
-            <View style={styles.summaryItemThumbWrap}>
-              {orderItemImageUri ? (
-                <Image source={{ uri: orderItemImageUri }} style={styles.summaryItemThumb} resizeMode="cover" />
-              ) : (
-                <View style={styles.summaryItemThumbFallback}>
-                  <Ionicons name="image-outline" size={18} color={MUTED_TEXT} />
-                </View>
-              )}
-            </View>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={styles.orderItemTitle} numberOfLines={3}>
-                {order.items || 'Your order'}
-              </Text>
-              <View style={styles.typePillSmall}>
-                <Ionicons
-                  name={
-                    order.type === 'Delivery'
-                      ? 'bicycle-outline'
-                      : order.type === 'Dine In'
-                        ? 'restaurant-outline'
-                        : 'bag-handle-outline'
-                  }
-                  size={11}
-                  color={GOLD}
-                />
-                <Text style={styles.typePillSmallText}>{order.type}</Text>
-              </View>
-            </View>
-            <Text style={styles.amountLarge}>{order.amount}</Text>
-          </View>
-
-          {itemLines.length > 1 ? (
-            <View style={styles.lineItems}>
-              {itemLines.map((line, idx) => (
-                <View key={`${idx}-${line.slice(0, 24)}`} style={styles.lineItemRow}>
-                  <Text style={styles.lineItemBullet}>•</Text>
-                  <Text style={styles.lineItemText}>{line}</Text>
-                </View>
-              ))}
-            </View>
+          {parsedOrderLines.length === 0 ? (
+            <Text style={styles.summaryFallbackText}>{order.items?.trim() || 'No items listed'}</Text>
           ) : null}
+          {parsedOrderLines.map((line, idx) => {
+            const uri = lineImageUris[idx] || '';
+            return (
+              <View
+                key={`${idx}-${String(line.title).slice(0, 40)}`}
+                style={[styles.summaryLineRow, idx < parsedOrderLines.length - 1 ? styles.summaryLineRowDivider : null]}
+              >
+                <View style={styles.summaryItemThumbWrap}>
+                  {uri ? (
+                    <Image source={{ uri }} style={styles.summaryItemThumb} resizeMode="cover" />
+                  ) : (
+                    <View style={styles.summaryItemThumbFallback}>
+                      <Ionicons name="image-outline" size={18} color={MUTED_TEXT} />
+                    </View>
+                  )}
+                </View>
+                <View style={styles.summaryLineBody}>
+                  <View style={styles.summaryLineTopRow}>
+                    <View style={styles.summaryLineTitleBlock}>
+                      <Text style={styles.summaryLineTitle} numberOfLines={3}>
+                        {line.title}
+                        <Text style={styles.summaryQtyText}>
+                          {' '}
+                          ×{line.quantity}
+                        </Text>
+                      </Text>
+                    </View>
+                    <Text style={styles.summaryLinePrice}>
+                      {lineTotals[idx] != null ? formatMoney(lineTotals[idx]!) : '—'}
+                    </Text>
+                  </View>
+                  {line.instruction ? (
+                    <Text style={styles.summaryInstructionLine} numberOfLines={5}>
+                      <Text style={styles.summaryInstructionLabel}>Instruction: </Text>
+                      <Text style={styles.summaryInstructionValue}>{line.instruction}</Text>
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+            );
+          })}
+          <View style={styles.typePillRow}>
+            <View style={styles.typePillSmall}>
+              <Ionicons
+                name={
+                  order.type === 'Delivery'
+                    ? 'bicycle-outline'
+                    : order.type === 'Dine In'
+                      ? 'restaurant-outline'
+                      : 'bag-handle-outline'
+                }
+                size={11}
+                color={GOLD}
+              />
+              <Text style={styles.typePillSmallText}>{order.type}</Text>
+            </View>
+          </View>
 
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>Total</Text>
@@ -1021,11 +1090,70 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: GOLD,
   },
-  summaryHeroRow: {
+  summaryLineRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
+    marginTop: 10,
+    paddingBottom: 12,
+  },
+  summaryLineRowDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  summaryLineBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  summaryLineTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  summaryLineTitleBlock: {
+    flex: 1,
+    minWidth: 0,
+  },
+  summaryLineTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: TEXT_WHITE,
+    lineHeight: 20,
+  },
+  summaryQtyText: {
+    fontWeight: '800',
+    color: GOLD,
+  },
+  summaryLinePrice: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: GOLD,
+    flexShrink: 0,
+    paddingTop: 1,
+  },
+  summaryInstructionLine: {
     marginTop: 8,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  summaryInstructionLabel: {
+    fontWeight: '700',
+    color: GOLD,
+  },
+  summaryInstructionValue: {
+    fontWeight: '500',
+    color: MUTED_TEXT,
+  },
+  summaryFallbackText: {
+    marginTop: 8,
+    fontSize: 13,
+    color: MUTED_TEXT,
+    lineHeight: 20,
+  },
+  typePillRow: {
+    marginTop: 8,
+    alignItems: 'flex-start',
   },
   summaryItemThumbWrap: {
     width: 56,
@@ -1047,18 +1175,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.06)',
   },
-  orderItemTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: TEXT_WHITE,
-    lineHeight: 20,
-  },
   typePillSmall: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     alignSelf: 'flex-start',
-    marginTop: 8,
     backgroundColor: 'rgba(254,203,77,0.1)',
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -1068,33 +1189,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: GOLD,
-  },
-  amountLarge: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: GOLD,
-  },
-  lineItems: {
-    marginTop: 14,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.08)',
-    gap: 8,
-  },
-  lineItemRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-  },
-  lineItemBullet: {
-    color: MUTED_TEXT,
-    fontSize: 14,
-  },
-  lineItemText: {
-    flex: 1,
-    fontSize: 13,
-    color: MUTED_TEXT,
-    lineHeight: 18,
   },
   totalRow: {
     marginTop: 16,
