@@ -11,12 +11,12 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { ItemDetailParamItem } from './ItemDetailScreen';
 import { getMenuItems, getCachedMenuItems, type MenuItem as ApiMenuItem } from '../../api/Menu';
 import { getNetworkErrorMessage } from '../../api/apiConfig';
 import { MenuScreenSkeleton } from '../../components/skeleton/MenuScreenSkeleton';
-import { addToWishlist } from '../../api/wishlist';
+import { getWishlist, toggleWishlistProduct } from '../../api/wishlist';
 import { getProductReviewsSummary } from '../../api/review';
 import { getToken } from '../../storagetank';
 import { navigateToLoginRegister } from '../../navigation/rootNavigationRef';
@@ -70,6 +70,8 @@ interface ProductCardProps {
   onWishlistPress: (item: MenuProduct) => void;
   onQuickAdd: (item: MenuProduct) => void;
   wishlistUpdating: boolean;
+  inWishlist: boolean;
+  showWishlist: boolean;
 }
 
 function parseOptionalNumber(value: unknown): number | null {
@@ -123,24 +125,36 @@ const ProductCard = memo(function ProductCard({
   onWishlistPress,
   onQuickAdd,
   wishlistUpdating,
+  inWishlist,
+  showWishlist,
 }: ProductCardProps) {
   return (
     <Pressable
       style={styles.productCard}
       onPress={() => onPress(item)}
     >
-      <Pressable
-        style={styles.wishBtn}
-        onPress={(e) => {
-          e.stopPropagation();
-          onWishlistPress(item);
-        }}
-        hitSlop={8}
-        accessibilityLabel="Add to wishlist"
-        disabled={wishlistUpdating}
-      >
-        <Ionicons name="heart-outline" size={17} color={BG_DARK} />
-      </Pressable>
+      {showWishlist ? (
+        <Pressable
+          style={({ pressed }) => [
+            styles.wishBtn,
+            inWishlist ? styles.wishBtnActive : styles.wishBtnInactive,
+            pressed && styles.wishBtnPressed,
+          ]}
+          onPress={(e) => {
+            e.stopPropagation();
+            onWishlistPress(item);
+          }}
+          hitSlop={8}
+          accessibilityLabel={inWishlist ? 'Remove from wishlist' : 'Add to wishlist'}
+          disabled={wishlistUpdating}
+        >
+          <Ionicons
+            name={inWishlist ? 'heart' : 'heart-outline'}
+            size={17}
+            color={inWishlist ? BG_DARK : 'rgba(11, 29, 27, 0.5)'}
+          />
+        </Pressable>
+      ) : null}
 
       <Pressable
         style={styles.addBtn}
@@ -240,6 +254,8 @@ export default function MenuScreen() {
   const [error, setError] = useState<string | null>(null);
   const navigation = useNavigation<Nav>();
   const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set());
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [wishlistIds, setWishlistIds] = useState<Set<string>>(new Set());
   const [ratingById, setRatingById] = useState<Record<string, { avg: number; count: number }>>({});
 
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -259,11 +275,44 @@ export default function MenuScreen() {
     setToast({ message, type });
   }, []);
 
+  const loadWishlistIds = useCallback(async () => {
+    try {
+      const token = await getToken();
+      if (!token) {
+        setWishlistIds(new Set());
+        return;
+      }
+      const data = await getWishlist();
+      const items = Array.isArray((data as { items?: unknown }).items)
+        ? (data as { items: unknown[] }).items
+        : [];
+      const ids = new Set<string>();
+      items.forEach((it) => {
+        const row = it as { productId?: unknown; id?: unknown };
+        const rawId = row?.productId ?? row?.id;
+        if (rawId != null) ids.add(String(rawId));
+      });
+      setWishlistIds(ids);
+    } catch {
+      setWishlistIds(new Set());
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void (async () => {
+        const token = await getToken();
+        setIsLoggedIn(!!token);
+        await loadWishlistIds();
+      })();
+    }, [loadWishlistIds])
+  );
+
   const handleItemPress = useCallback((item: MenuProduct) => {
     navigation.getParent()?.navigate('ItemDetail', { item: item as unknown as ItemDetailParamItem });
   }, [navigation]);
 
-  const handleAddToWishlist = useCallback(
+  const handleWishlistToggle = useCallback(
     async (item: MenuProduct) => {
       const idStr = String(item.id);
       const productIdNum = Number(item.id);
@@ -279,6 +328,8 @@ export default function MenuScreen() {
         return;
       }
 
+      const wasInWishlist = wishlistIds.has(idStr);
+
       setUpdatingIds((prev) => {
         const next = new Set(prev);
         next.add(idStr);
@@ -286,11 +337,22 @@ export default function MenuScreen() {
       });
 
       try {
-        await addToWishlist(productIdNum);
-        showToast('Added to wishlist', 'success');
+        await toggleWishlistProduct(productIdNum, wasInWishlist);
+        if (wasInWishlist) {
+          setWishlistIds((prev) => {
+            const next = new Set(prev);
+            next.delete(idStr);
+            return next;
+          });
+          showToast('Removed from wishlist', 'success');
+        } else {
+          setWishlistIds((prev) => new Set(prev).add(idStr));
+          showToast('Added to wishlist', 'success');
+        }
       } catch (e) {
         const msg = getNetworkErrorMessage(e);
-        if (/already|exists|duplicate/i.test(msg)) {
+        if (!wasInWishlist && /already|exists|duplicate/i.test(msg)) {
+          setWishlistIds((prev) => new Set(prev).add(idStr));
           showToast('Already in wishlist', 'error');
         } else {
           showToast(msg, 'error');
@@ -303,7 +365,7 @@ export default function MenuScreen() {
         });
       }
     },
-    [showToast]
+    [showToast, wishlistIds]
   );
 
   const handleQuickAddToCart = useCallback(
@@ -394,17 +456,20 @@ export default function MenuScreen() {
   const renderProductItem = useCallback(
     ({ item }: { item: MenuProduct }) => {
       const isUpdating = updatingIds.has(String(item.id));
+      const inWishlist = wishlistIds.has(String(item.id));
       return (
         <ProductCard
           item={item}
           onPress={handleItemPress}
-          onWishlistPress={handleAddToWishlist}
+          onWishlistPress={handleWishlistToggle}
           onQuickAdd={handleQuickAddToCart}
           wishlistUpdating={isUpdating}
+          inWishlist={inWishlist}
+          showWishlist={isLoggedIn}
         />
       );
     },
-    [handleAddToWishlist, handleItemPress, handleQuickAddToCart, updatingIds]
+    [handleWishlistToggle, handleItemPress, handleQuickAddToCart, updatingIds, wishlistIds, isLoggedIn]
   );
 
   const keyExtractor = useCallback((item: MenuProduct) => item.id, []);
@@ -567,11 +632,26 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: GOLD,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 20,
     elevation: 8,
+  },
+  wishBtnInactive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.55)',
+  },
+  wishBtnActive: {
+    backgroundColor: GOLD,
+    borderWidth: 0,
+    shadowColor: GOLD,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.55,
+    shadowRadius: 6,
+  },
+  wishBtnPressed: {
+    opacity: 0.88,
   },
   productImageWrap: {
     width: '100%',

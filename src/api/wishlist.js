@@ -51,6 +51,22 @@ export async function addToWishlist(productId) {
   return json;
 }
 
+/**
+ * Add or remove one product — use when the UI already knows whether it is saved.
+ * @param {number|string} productId
+ * @param {boolean} isCurrentlySaved - if true, calls DELETE; if false, calls POST
+ */
+export async function toggleWishlistProduct(productId, isCurrentlySaved) {
+  const id = typeof productId === 'number' ? productId : Number(productId);
+  if (!Number.isFinite(id)) {
+    throw new Error('Invalid product id');
+  }
+  if (isCurrentlySaved) {
+    return removeFromWishlist(id);
+  }
+  return addToWishlist(id);
+}
+
 export async function getWishlist() {
   const token = await getToken();
   if (!token) throw new Error('Not authenticated');

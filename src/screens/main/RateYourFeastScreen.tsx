@@ -318,19 +318,13 @@ export default function RateYourFeastScreen() {
                   )}
                 </View>
                 <View style={styles.dishContent}>
-                  <Text style={styles.dishName} numberOfLines={3}>
-                    {line.title}
+                  <Text style={styles.dishName} numberOfLines={2}>
+                    {baseProductNameFromOrderLine(line.title)}
                     <Text style={styles.dishQtyText}>
                       {' '}
                       ×{line.quantity}
                     </Text>
                   </Text>
-                  {line.instruction ? (
-                    <Text style={styles.dishInstructionLine} numberOfLines={4}>
-                      <Text style={styles.dishInstructionLabel}>Instruction: </Text>
-                      <Text style={styles.dishInstructionValue}>{line.instruction}</Text>
-                    </Text>
-                  ) : null}
                   <StarPicker
                     value={rating}
                     onChange={(n) =>
@@ -537,19 +531,6 @@ const styles = StyleSheet.create({
   dishQtyText: {
     fontWeight: '800',
     color: GOLD,
-  },
-  dishInstructionLine: {
-    marginTop: 6,
-    fontSize: 12,
-    lineHeight: 17,
-  },
-  dishInstructionLabel: {
-    fontWeight: '700',
-    color: GOLD,
-  },
-  dishInstructionValue: {
-    fontWeight: '500',
-    color: MUTED,
   },
   tagRow: {
     flexDirection: 'row',

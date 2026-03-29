@@ -126,7 +126,7 @@ export default function ProfileScreen() {
                 <Text style={styles.heroName}>Hi, guest!</Text>
                 <Text style={styles.heroEmail}>Log in to make an order</Text>
               </View>
-              <Pressable style={styles.signInHeroButton} onPress={navigateToLoginRegister}>
+              <Pressable style={styles.signInHeroButton} onPress={() => navigateToLoginRegister()}>
                 <Text style={styles.signInText}>Sign In</Text>
               </Pressable>
             </View>
@@ -248,19 +248,10 @@ export default function ProfileScreen() {
                 </View>
                 <View style={styles.deleteModalInfoRow}>
                   <View style={styles.deleteModalInfoIconWrap}>
-                    <Ionicons name="gift-outline" size={18} color={GOLD} />
-                  </View>
-                  <View style={styles.deleteModalInfoTextCol}>
-                    <Text style={styles.deleteModalInfoTitle}>Rewards &amp; Points</Text>
-                    <Text style={styles.deleteModalInfoBody}>Your current status and unused salsa tokens.</Text>
-                  </View>
-                </View>
-                <View style={styles.deleteModalInfoRow}>
-                  <View style={styles.deleteModalInfoIconWrap}>
                     <Ionicons name="location-outline" size={18} color={GOLD} />
                   </View>
                   <View style={styles.deleteModalInfoTextCol}>
-                    <Text style={styles.deleteModalInfoTitle}>Saved Addresses</Text>
+                    <Text style={styles.deleteModalInfoTitle}>My Address</Text>
                     <Text style={styles.deleteModalInfoBody}>Your home, office, and secret snack spots.</Text>
                   </View>
                 </View>

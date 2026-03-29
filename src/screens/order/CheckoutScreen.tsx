@@ -33,6 +33,8 @@ import { navigateToLoginRegister } from '../../navigation/rootNavigationRef';
 
 const BG_DARK = '#0B1D1B';
 const CARD_BG = '#152C29';
+/** Shared surface for cardholder + Stripe CardField — sits above BG_DARK so fields read as one layer. */
+const STRIPE_FIELD_SURFACE = '#122722';
 const GOLD = '#FECB4D';
 const TEXT_WHITE = '#FFFFFF';
 const MUTED_TEXT = 'rgba(255,255,255,0.7)';
@@ -746,35 +748,39 @@ export default function CheckoutScreen() {
               </View>
             ) : (
               <View style={styles.cardForm}>
-                <Text style={styles.cardFormLabel}>Cardholder name</Text>
-                <TextInput
-                  style={styles.cardInput}
-                  placeholder="Name on card"
-                  placeholderTextColor={MUTED_TEXT}
-                  value={cardholderName}
-                  onChangeText={setCardholderName}
-                  selectionColor={TEXT_WHITE}
-                  autoCapitalize="words"
-                  autoCorrect={false}
-                />
-                <Text style={[styles.cardFormLabel, { marginTop: 12 }]}>Card details</Text>
-                <View style={styles.cardFieldWrap}>
-                  <CardField
-                    postalCodeEnabled={false}
-                    placeholders={{ number: '4242 4242 4242 4242' }}
-                    cardStyle={{
-                      backgroundColor: CARD_BG,
-                      textColor: '#FFFFFF',
-                      placeholderColor: 'rgba(255,255,255,0.6)',
-                      borderColor: 'transparent',
-                      borderWidth: 0,
-                      borderRadius: 8,
-                      textErrorColor: '#FF6B6B',
-                      fontSize: 15,
-                    }}
-                    style={styles.cardField}
-                    onCardChange={setCardDetails}
+                <View style={styles.cardFormBlock}>
+                  <Text style={styles.cardFormLabel}>Cardholder name</Text>
+                  <TextInput
+                    style={styles.cardInput}
+                    placeholder="Name on card"
+                    placeholderTextColor={MUTED_TEXT}
+                    value={cardholderName}
+                    onChangeText={setCardholderName}
+                    selectionColor={TEXT_WHITE}
+                    autoCapitalize="words"
+                    autoCorrect={false}
                   />
+                </View>
+                <View style={styles.cardFormBlock}>
+                  <Text style={styles.cardFormLabel}>Card details</Text>
+                  <View style={styles.cardFieldWrap}>
+                    <CardField
+                      postalCodeEnabled={false}
+                      placeholders={{ number: '4242 4242 4242 4242' }}
+                      cardStyle={{
+                        backgroundColor: STRIPE_FIELD_SURFACE,
+                        textColor: TEXT_WHITE,
+                        placeholderColor: 'rgba(255,255,255,0.55)',
+                        borderColor: 'transparent',
+                        borderWidth: 0,
+                        borderRadius: 8,
+                        textErrorColor: '#FF6B6B',
+                        fontSize: 15,
+                      }}
+                      style={styles.cardField}
+                      onCardChange={setCardDetails}
+                    />
+                  </View>
                 </View>
               </View>
             )
@@ -883,7 +889,7 @@ export default function CheckoutScreen() {
                   ]}
                   onPress={() => {
                     setLoginModalDismissed(true);
-                    navigateToLoginRegister();
+                    navigateToLoginRegister({ returnTo: 'Checkout' });
                   }}
                 >
                   <Text style={styles.loginRequiredPrimaryText}>Login / Register</Text>
@@ -1368,23 +1374,29 @@ const styles = StyleSheet.create({
   },
   cardForm: {
     marginTop: 10,
-    padding: 10,
-    backgroundColor: CARD_BG,
-    borderRadius: 12,
+    padding: 12,
+    backgroundColor: BG_DARK,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: 'rgba(254, 203, 77, 0.22)',
+    gap: 14,
+  },
+  cardFormBlock: {
+    gap: 6,
   },
   cardFormLabel: {
     fontSize: 12,
     fontWeight: '600',
     color: MUTED_TEXT,
-    marginBottom: 4,
+    marginBottom: 0,
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
   },
   cardFieldWrap: {
-    backgroundColor: CARD_BG,
+    backgroundColor: STRIPE_FIELD_SURFACE,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(254, 203, 77, 0.28)',
+    borderColor: 'rgba(254, 203, 77, 0.35)',
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
@@ -1393,14 +1405,14 @@ const styles = StyleSheet.create({
     height: 44,
   },
   cardInput: {
-    backgroundColor: BG_DARK,
+    backgroundColor: STRIPE_FIELD_SURFACE,
     borderRadius: 10,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 12,
     fontSize: 15,
     color: TEXT_WHITE,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderColor: 'rgba(254, 203, 77, 0.35)',
   },
   notesInput: {
     backgroundColor: CARD_BG,

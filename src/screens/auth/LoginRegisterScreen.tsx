@@ -12,8 +12,10 @@ import {
   Animated,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
-import { Ionicons, FontAwesome } from '@expo/vector-icons';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import type { RouteProp } from '@react-navigation/native';
+import type { RootStackParamList } from '../../navigation/RootNavigator';
+import { Ionicons } from '@expo/vector-icons';
 import { register as registerApi, login as loginApi, googleSocialLogin } from '../../api/auth';
 import { getCurrentUser } from '../../api/profile';
 import { registerForPushNotifications } from '../../services/pushNotifications';
@@ -29,8 +31,6 @@ const GOLD = '#FECB4D';
 const TEXT_WHITE = '#FFFFFF';
 const MUTED_TEXT = 'rgba(255,255,255,0.7)';
 const HORIZONTAL_PADDING = 20;
-
-type AuthTab = 'Login' | 'Register';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_REGEX = /^[+]?[\d\s\-()]{7,20}$/;
@@ -48,16 +48,21 @@ function normalizeLoginErrorMessage(error: unknown): string {
 export default function LoginRegisterScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
-  const [authTab, setAuthTab] = useState<AuthTab>('Login');
+  const route = useRoute<RouteProp<RootStackParamList, 'LoginRegister'>>();
+  const returnTo = route.params?.returnTo;
+  /** false = login (default), true = register form */
+  const [showRegister, setShowRegister] = useState(false);
 
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const [loginPasswordVisible, setLoginPasswordVisible] = useState(false);
   const [loginSubmitting, setLoginSubmitting] = useState(false);
 
   const [regName, setRegName] = useState('');
   const [regPhone, setRegPhone] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regPassword, setRegPassword] = useState('');
+  const [regPasswordVisible, setRegPasswordVisible] = useState(false);
   const [regSubmitting, setRegSubmitting] = useState(false);
   const [googleSubmitting, setGoogleSubmitting] = useState(false);
   const [regErrors, setRegErrors] = useState<{
@@ -86,7 +91,14 @@ export default function LoginRegisterScreen() {
     setToast({ message, type });
   };
 
-  const goToDiscoverAfterAuth = () => {
+  const navigateAfterSuccessfulAuth = () => {
+    if (returnTo === 'Checkout') {
+      navigation.reset({
+        index: 1,
+        routes: [{ name: 'Main' }, { name: 'Checkout' }],
+      });
+      return;
+    }
     navigation.reset({
       index: 0,
       routes: [{ name: 'Main' }],
@@ -158,7 +170,7 @@ export default function LoginRegisterScreen() {
       void registerForPushNotifications();
 
       showToast('Signed in with Google successfully.', 'success');
-      setTimeout(() => goToDiscoverAfterAuth(), 800);
+      setTimeout(() => navigateAfterSuccessfulAuth(), 800);
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Google sign-in failed.', 'error');
     } finally {
@@ -185,7 +197,7 @@ export default function LoginRegisterScreen() {
       setLoginEmail('');
       setLoginPassword('');
       showToast('Signed in successfully.', 'success');
-      setTimeout(() => goToDiscoverAfterAuth(), 800);
+      setTimeout(() => navigateAfterSuccessfulAuth(), 800);
     } catch (e) {
       showToast(normalizeLoginErrorMessage(e), 'error');
     } finally {
@@ -248,10 +260,10 @@ export default function LoginRegisterScreen() {
       setRegEmail('');
       setRegPassword('');
       setRegErrors({});
-      goToDiscoverAfterAuth();
+      navigateAfterSuccessfulAuth();
     } catch (e) {
-      // If auto-login fails, fall back to showing the Login tab.
-      setAuthTab('Login');
+      // If auto-login fails, fall back to the login form.
+      setShowRegister(false);
     } finally {
       setRegSubmitting(false);
     }
@@ -267,27 +279,8 @@ export default function LoginRegisterScreen() {
           <Pressable style={styles.backButton} onPress={() => navigation.goBack()}>
             <Ionicons name="arrow-back" size={24} color={BG_DARK} />
           </Pressable>
-          <Text style={styles.headerTitle}>Login / Register</Text>
+          <Text style={styles.headerTitle}>{showRegister ? 'Create account' : 'Login'}</Text>
           <View style={styles.headerSpacer} />
-        </View>
-
-        <View style={styles.authTabBar}>
-          <Pressable
-            style={[styles.authTab, authTab === 'Login' && styles.authTabActive]}
-            onPress={() => setAuthTab('Login')}
-          >
-            <Text style={[styles.authTabText, authTab === 'Login' && styles.authTabTextActive]}>
-              Login
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[styles.authTab, authTab === 'Register' && styles.authTabActive]}
-            onPress={() => setAuthTab('Register')}
-          >
-            <Text style={[styles.authTabText, authTab === 'Register' && styles.authTabTextActive]}>
-              Register
-            </Text>
-          </Pressable>
         </View>
 
         <ScrollView
@@ -296,7 +289,7 @@ export default function LoginRegisterScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {authTab === 'Login' ? (
+          {!showRegister ? (
             <>
               <View style={styles.formGroup}>
                 <Text style={styles.label}>Email *</Text>
@@ -313,15 +306,29 @@ export default function LoginRegisterScreen() {
               </View>
               <View style={styles.formGroup}>
                 <Text style={styles.label}>Password *</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter your password"
-                  placeholderTextColor={MUTED_TEXT}
-                  secureTextEntry
-                  value={loginPassword}
-                  onChangeText={setLoginPassword}
-                  editable={!loginSubmitting}
-                />
+                <View style={styles.passwordRow}>
+                  <TextInput
+                    style={styles.passwordInput}
+                    placeholder="Enter your password"
+                    placeholderTextColor={MUTED_TEXT}
+                    secureTextEntry={!loginPasswordVisible}
+                    value={loginPassword}
+                    onChangeText={setLoginPassword}
+                    editable={!loginSubmitting}
+                  />
+                  <Pressable
+                    style={styles.eyeButton}
+                    onPress={() => setLoginPasswordVisible((v) => !v)}
+                    hitSlop={8}
+                    accessibilityLabel={loginPasswordVisible ? 'Hide password' : 'Show password'}
+                  >
+                    <Ionicons
+                      name={loginPasswordVisible ? 'eye-off-outline' : 'eye-outline'}
+                      size={22}
+                      color={MUTED_TEXT}
+                    />
+                  </Pressable>
+                </View>
               </View>
               <Pressable
                 style={[styles.primaryButton, loginSubmitting && styles.primaryButtonDisabled]}
@@ -334,8 +341,18 @@ export default function LoginRegisterScreen() {
                   <Text style={styles.primaryButtonText}>Log In</Text>
                 )}
               </Pressable>
-
-              {/* Social login hidden as requested */}
+              <Pressable
+                style={styles.secondaryLink}
+                onPress={() => setShowRegister(true)}
+                hitSlop={8}
+                accessibilityRole="link"
+                accessibilityLabel="Don't have an account? Please create account"
+              >
+                <Text style={styles.secondaryLinkLine}>
+                  <Text style={styles.secondaryLinkPrefix}>Don&apos;t have an account? </Text>
+                  <Text style={styles.secondaryLinkEmphasis}>Please create account</Text>
+                </Text>
+              </Pressable>
             </>
           ) : (
             <>
@@ -395,20 +412,34 @@ export default function LoginRegisterScreen() {
               </View>
               <View style={styles.formGroup}>
                 <Text style={styles.label}>Password *</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Minimum 6 characters"
-                  placeholderTextColor={MUTED_TEXT}
-                  secureTextEntry
-                  value={regPassword}
-                  onChangeText={(t) => {
-                    setRegPassword(t);
-                    if (regErrors.password) {
-                      setRegErrors((prev) => ({ ...prev, password: undefined }));
-                    }
-                  }}
-                  editable={!regSubmitting}
-                />
+                <View style={styles.passwordRow}>
+                  <TextInput
+                    style={styles.passwordInput}
+                    placeholder="Minimum 6 characters"
+                    placeholderTextColor={MUTED_TEXT}
+                    secureTextEntry={!regPasswordVisible}
+                    value={regPassword}
+                    onChangeText={(t) => {
+                      setRegPassword(t);
+                      if (regErrors.password) {
+                        setRegErrors((prev) => ({ ...prev, password: undefined }));
+                      }
+                    }}
+                    editable={!regSubmitting}
+                  />
+                  <Pressable
+                    style={styles.eyeButton}
+                    onPress={() => setRegPasswordVisible((v) => !v)}
+                    hitSlop={8}
+                    accessibilityLabel={regPasswordVisible ? 'Hide password' : 'Show password'}
+                  >
+                    <Ionicons
+                      name={regPasswordVisible ? 'eye-off-outline' : 'eye-outline'}
+                      size={22}
+                      color={MUTED_TEXT}
+                    />
+                  </Pressable>
+                </View>
                 {regErrors.password ? <Text style={styles.fieldErrorText}>{regErrors.password}</Text> : null}
               </View>
               <Pressable
@@ -422,8 +453,18 @@ export default function LoginRegisterScreen() {
                   <Text style={styles.primaryButtonText}>Register</Text>
                 )}
               </Pressable>
-
-              {/* Social login hidden as requested */}
+              <Pressable
+                style={styles.secondaryLinkMuted}
+                onPress={() => setShowRegister(false)}
+                hitSlop={8}
+                accessibilityRole="link"
+                accessibilityLabel="Already have an account? Sign in"
+              >
+                <Text style={styles.secondaryLinkLine}>
+                  <Text style={styles.secondaryLinkPrefix}>Already have an account? </Text>
+                  <Text style={styles.secondaryLinkEmphasis}>Sign in</Text>
+                </Text>
+              </Pressable>
             </>
           )}
         </ScrollView>
@@ -480,33 +521,33 @@ const styles = StyleSheet.create({
   headerSpacer: {
     width: 40,
   },
-  authTabBar: {
-    flexDirection: 'row',
-    marginHorizontal: HORIZONTAL_PADDING,
-    marginBottom: 20,
-    backgroundColor: CARD_BG,
-    borderRadius: 12,
-    padding: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(254,185,72,0.25)',
-  },
-  authTab: {
-    flex: 1,
-    paddingVertical: 12,
+  secondaryLink: {
+    marginTop: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 8,
   },
-  authTabActive: {
-    backgroundColor: 'rgba(254,203,77,0.25)',
+  secondaryLinkLine: {
+    textAlign: 'center',
+    lineHeight: 22,
   },
-  authTabText: {
-    fontSize: 13,
-    fontWeight: '600',
+  secondaryLinkPrefix: {
+    fontSize: 14,
+    fontWeight: '500',
     color: MUTED_TEXT,
   },
-  authTabTextActive: {
+  secondaryLinkEmphasis: {
+    fontSize: 14,
+    fontWeight: '700',
     color: GOLD,
+  },
+  secondaryLinkMuted: {
+    marginTop: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 8,
   },
   scroll: {
     flex: 1,
@@ -535,6 +576,28 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: TEXT_WHITE,
   },
+  passwordRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: CARD_BG,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(254,185,72,0.25)',
+    paddingRight: 4,
+    minHeight: 48,
+  },
+  passwordInput: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 13,
+    color: TEXT_WHITE,
+  },
+  eyeButton: {
+    padding: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   fieldErrorText: {
     marginTop: 6,
     fontSize: 12,
@@ -547,7 +610,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 24,
+    marginTop: 8,
   },
   primaryButtonText: {
     fontSize: 14,

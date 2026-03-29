@@ -8,8 +8,14 @@ export function navigateToCart(): void {
   }
 }
 
-export function navigateToLoginRegister(): void {
+/** Pass `returnTo: 'Checkout'` when opening auth from the checkout login gate. */
+export function navigateToLoginRegister(params?: { returnTo?: 'Checkout' }): void {
   if (rootNavigationRef.isReady()) {
-    rootNavigationRef.navigate('LoginRegister' as never);
+    const nav = rootNavigationRef as { navigate: (name: string, p?: object) => void };
+    if (params?.returnTo) {
+      nav.navigate('LoginRegister', params);
+    } else {
+      nav.navigate('LoginRegister');
+    }
   }
 }

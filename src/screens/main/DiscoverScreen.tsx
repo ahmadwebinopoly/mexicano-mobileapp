@@ -40,7 +40,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getVisit } from '../../api/content';
 import * as Location from 'expo-location';
 import { getToken } from '../../storagetank';
-import { addToWishlist, getWishlist } from '../../api/wishlist';
+import { getWishlist } from '../../api/wishlist';
 import { getOrderModes } from '../../api/orderModes';
 import { useCart } from '../../contexts/CartContext';
 import { getProductReviewsSummary } from '../../api/review';
