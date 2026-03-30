@@ -339,29 +339,6 @@ export default function LoginRegisterScreen() {
                   <Text style={styles.primaryButtonText}>Log In</Text>
                 )}
               </Pressable>
-
-              <View style={styles.dividerRow}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>OR</Text>
-                <View style={styles.dividerLine} />
-              </View>
-
-              <View style={styles.socialRow}>
-                <Pressable
-                  style={styles.socialButton}
-                  onPress={() => void handleGoogleSocialLogin()}
-                  disabled={googleSubmitting}
-                  accessibilityRole="button"
-                  accessibilityLabel="Continue with Google"
-                >
-                  {googleSubmitting ? (
-                    <ActivityIndicator size="small" color={GOLD} />
-                  ) : (
-                    <Ionicons name="logo-google" size={18} color={TEXT_WHITE} />
-                  )}
-                  <Text style={styles.socialButtonText}>Continue with Google</Text>
-                </Pressable>
-              </View>
               <Pressable
                 style={styles.secondaryLink}
                 onPress={() => setShowRegister(true)}
@@ -474,29 +451,6 @@ export default function LoginRegisterScreen() {
                   <Text style={styles.primaryButtonText}>Register</Text>
                 )}
               </Pressable>
-
-              <View style={styles.dividerRow}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>OR</Text>
-                <View style={styles.dividerLine} />
-              </View>
-
-              <View style={styles.socialRow}>
-                <Pressable
-                  style={styles.socialButton}
-                  onPress={() => void handleGoogleSocialLogin()}
-                  disabled={googleSubmitting}
-                  accessibilityRole="button"
-                  accessibilityLabel="Continue with Google"
-                >
-                  {googleSubmitting ? (
-                    <ActivityIndicator size="small" color={GOLD} />
-                  ) : (
-                    <Ionicons name="logo-google" size={18} color={TEXT_WHITE} />
-                  )}
-                  <Text style={styles.socialButtonText}>Continue with Google</Text>
-                </Pressable>
-              </View>
               <Pressable
                 style={styles.secondaryLinkMuted}
                 onPress={() => setShowRegister(false)}
@@ -691,43 +645,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
     textAlign: 'center',
-  },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 28,
-    marginBottom: 20,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-  },
-  dividerText: {
-    marginHorizontal: 12,
-    fontSize: 12,
-    fontWeight: '500',
-    color: MUTED_TEXT,
-  },
-  socialRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  socialButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    backgroundColor: CARD_BG,
-    borderRadius: 12,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(254,185,72,0.25)',
-  },
-  socialButtonText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: TEXT_WHITE,
   },
 });

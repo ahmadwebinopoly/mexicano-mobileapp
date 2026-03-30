@@ -38,6 +38,8 @@ export default function ContactScreen() {
   const [errors, setErrors] = useState<ContactErrors>({});
   const [submitStatus, setSubmitStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+  const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
   useEffect(() => {
     const t = setTimeout(() => setShowContactSkeleton(false), 200);
     return () => clearTimeout(t);
@@ -57,7 +59,8 @@ export default function ContactScreen() {
 
     const nextErrors: ContactErrors = {};
     if (!trimmedPhone) nextErrors.phone = 'Phone number is required.';
-    if (!trimmedEmail) nextErrors.email = 'Address is required.';
+    if (!trimmedEmail) nextErrors.email = 'Email address is required.';
+    else if (!EMAIL_REGEX.test(trimmedEmail)) nextErrors.email = 'Please enter a valid email address.';
     if (!trimmedMessage) nextErrors.message = 'Short message is required.';
     setErrors(nextErrors);
     setSubmitStatus(null);
@@ -143,18 +146,18 @@ export default function ContactScreen() {
               />
               {errors.phone ? <Text style={styles.fieldError}>{errors.phone}</Text> : null}
 
-              <Text style={styles.label}>Address *</Text>
+              <Text style={styles.label}>Email Address *</Text>
               <TextInput
                 style={styles.input}
-                placeholder="e.g. 742 Salsa Street, Dallas"
+                placeholder="e.g. hello@example.com"
                 placeholderTextColor={PLACEHOLDER_COLOR}
                 value={email}
                 onChangeText={(v) => {
                   setEmail(v);
                   setErrors((prev) => ({ ...prev, email: undefined }));
                 }}
-                keyboardType="default"
-                autoCapitalize="words"
+                keyboardType="email-address"
+                autoCapitalize="none"
                 editable={!submitting}
               />
               {errors.email ? <Text style={styles.fieldError}>{errors.email}</Text> : null}

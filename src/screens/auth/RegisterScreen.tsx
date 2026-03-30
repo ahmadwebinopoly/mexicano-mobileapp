@@ -159,22 +159,6 @@ export default function RegisterScreen() {
             )}
           </Pressable>
 
-          <View style={styles.dividerRow}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>OR</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          <Pressable
-            style={styles.socialButton}
-            onPress={() => navigation.navigate('LoginRegister', { socialProvider: 'google' })}
-            accessibilityRole="button"
-            accessibilityLabel="Continue with Google"
-          >
-            <Ionicons name="logo-google" size={18} color={TEXT_WHITE} />
-            <Text style={styles.socialButtonText}>Continue with Google</Text>
-          </Pressable>
-
           <Pressable
             style={styles.signInLinkWrap}
             onPress={() => navigation.navigate('Login')}
@@ -323,21 +307,5 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
     color: MUTED_TEXT,
-  },
-  socialButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    backgroundColor: CARD_BG,
-    borderRadius: 12,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(254,185,72,0.25)',
-  },
-  socialButtonText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: TEXT_WHITE,
   },
 });
