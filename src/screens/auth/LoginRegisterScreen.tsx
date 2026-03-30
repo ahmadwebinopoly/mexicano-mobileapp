@@ -16,12 +16,12 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../../navigation/RootNavigator';
 import { Ionicons } from '@expo/vector-icons';
-import { register as registerApi, login as loginApi, googleSocialLogin } from '../../api/auth';
+import { register as registerApi, login as loginApi, googleAuthCodeLogin } from '../../api/auth';
 import { getCurrentUser } from '../../api/profile';
 import { registerForPushNotifications } from '../../services/pushNotifications';
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
-import { makeRedirectUri } from 'expo-auth-session';
+import { makeRedirectUri, ResponseType } from 'expo-auth-session';
 
 const TOAST_DURATION = 2800;
 
@@ -50,6 +50,7 @@ export default function LoginRegisterScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<RouteProp<RootStackParamList, 'LoginRegister'>>();
   const returnTo = route.params?.returnTo;
+  const socialProvider = route.params?.socialProvider;
   /** false = login (default), true = register form */
   const [showRegister, setShowRegister] = useState(false);
 
@@ -74,6 +75,7 @@ export default function LoginRegisterScreen() {
 
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const toastOpacity = useRef(new Animated.Value(0)).current;
+  const hasAutoStartedSocialRef = useRef(false);
 
 
 
@@ -113,7 +115,11 @@ export default function LoginRegisterScreen() {
   WebBrowser.maybeCompleteAuthSession();
 
   // Must match `scheme` in `app.config.js` so Google can redirect back into the app.
-  const redirectUri = makeRedirectUri({ scheme: 'mexicanoapp' });
+  const redirectUri = makeRedirectUri({
+    // `useProxy` / `projectNameForProxy` exist at runtime; typings may lag by SDK.
+    useProxy: true,
+    projectNameForProxy: '@asad133/MexicanoApp',
+  } as any);
 
   // PKCE is required for many mobile OAuth security policies.
   const [, , promptAsync] = Google.useAuthRequest({
@@ -121,6 +127,7 @@ export default function LoginRegisterScreen() {
     redirectUri,
     scopes: ['openid', 'profile', 'email'],
     usePKCE: true,
+    responseType: ResponseType.Code,
   });
 
   const handleGoogleSocialLogin = async () => {
@@ -133,50 +140,41 @@ export default function LoginRegisterScreen() {
 
     setGoogleSubmitting(true);
     try {
-      const result = await promptAsync();
+      const result = await promptAsync({
+        // `useProxy` / `projectNameForProxy` exist at runtime; typings may lag by SDK.
+        useProxy: true,
+        projectNameForProxy: '@asad133/MexicanoApp',
+      } as any);
       if (!result || result.type !== 'success') {
-        showToast('Google sign-in cancelled.', 'error');
+        showToast('Google sign-in was cancelled.', 'error');
         return;
       }
 
-      const accessToken = result.authentication?.accessToken;
-      if (!accessToken) {
-        throw new Error('Google sign-in failed. Missing access token.');
+      const code = String((result as any)?.params?.code ?? '').trim();
+      if (!code) {
+        throw new Error('Google sign-in failed. Please try again.');
       }
 
-      const profileRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo?alt=json', {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-
-      if (!profileRes.ok) {
-        const text = await profileRes.text().catch(() => '');
-        throw new Error(text || `Google profile fetch failed: ${profileRes.status}`);
-      }
-
-      const profile = await profileRes.json().catch(() => ({})) as {
-        id?: string | number;
-        email?: string;
-        name?: string;
-        picture?: string;
-      };
-
-      const email = profile.email ?? '';
-      const name = profile.name ?? '';
-      const provider_id = profile.id != null ? String(profile.id) : '';
-      const avatar = profile.picture ?? undefined;
-
-      await googleSocialLogin({ email, name, provider_id, avatar });
+      await googleAuthCodeLogin({ code, redirectUri });
       await getCurrentUser();
       void registerForPushNotifications();
 
       showToast('Signed in with Google successfully.', 'success');
       setTimeout(() => navigateAfterSuccessfulAuth(), 800);
     } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Google sign-in failed.', 'error');
+      const msg = e instanceof Error ? e.message : 'Google sign-in failed.';
+      showToast(msg || 'Google sign-in failed.', 'error');
     } finally {
       setGoogleSubmitting(false);
     }
   };
+
+  useEffect(() => {
+    if (hasAutoStartedSocialRef.current) return;
+    if (socialProvider !== 'google') return;
+    hasAutoStartedSocialRef.current = true;
+    void handleGoogleSocialLogin();
+  }, [socialProvider]);
 
   const handleLogin = async () => {
     const email = loginEmail.trim();
@@ -341,6 +339,29 @@ export default function LoginRegisterScreen() {
                   <Text style={styles.primaryButtonText}>Log In</Text>
                 )}
               </Pressable>
+
+              <View style={styles.dividerRow}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>OR</Text>
+                <View style={styles.dividerLine} />
+              </View>
+
+              <View style={styles.socialRow}>
+                <Pressable
+                  style={styles.socialButton}
+                  onPress={() => void handleGoogleSocialLogin()}
+                  disabled={googleSubmitting}
+                  accessibilityRole="button"
+                  accessibilityLabel="Continue with Google"
+                >
+                  {googleSubmitting ? (
+                    <ActivityIndicator size="small" color={GOLD} />
+                  ) : (
+                    <Ionicons name="logo-google" size={18} color={TEXT_WHITE} />
+                  )}
+                  <Text style={styles.socialButtonText}>Continue with Google</Text>
+                </Pressable>
+              </View>
               <Pressable
                 style={styles.secondaryLink}
                 onPress={() => setShowRegister(true)}
@@ -453,6 +474,29 @@ export default function LoginRegisterScreen() {
                   <Text style={styles.primaryButtonText}>Register</Text>
                 )}
               </Pressable>
+
+              <View style={styles.dividerRow}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>OR</Text>
+                <View style={styles.dividerLine} />
+              </View>
+
+              <View style={styles.socialRow}>
+                <Pressable
+                  style={styles.socialButton}
+                  onPress={() => void handleGoogleSocialLogin()}
+                  disabled={googleSubmitting}
+                  accessibilityRole="button"
+                  accessibilityLabel="Continue with Google"
+                >
+                  {googleSubmitting ? (
+                    <ActivityIndicator size="small" color={GOLD} />
+                  ) : (
+                    <Ionicons name="logo-google" size={18} color={TEXT_WHITE} />
+                  )}
+                  <Text style={styles.socialButtonText}>Continue with Google</Text>
+                </Pressable>
+              </View>
               <Pressable
                 style={styles.secondaryLinkMuted}
                 onPress={() => setShowRegister(false)}

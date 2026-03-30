@@ -13,9 +13,13 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { login as loginApi } from '../../api/auth';
+import { login as loginApi, googleAuthCodeLogin } from '../../api/auth';
 import { getCurrentUser } from '../../api/profile';
 import { registerForPushNotifications } from '../../services/pushNotifications';
+import * as AuthSession from 'expo-auth-session';
+import * as WebBrowser from 'expo-web-browser';
+
+WebBrowser.maybeCompleteAuthSession();
 
 const BG_DARK = '#0B1D1B';
 const CARD_BG = '#152C29';
@@ -26,6 +30,7 @@ const MUTED_TEXT = 'rgba(255,255,255,0.7)';
 const HORIZONTAL_PADDING = 20;
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const GOOGLE_CLIENT_ID = '323254530748-5ckfnahana1p9sllilmnv9v9mfjqpjch.apps.googleusercontent.com';
 
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
@@ -34,6 +39,31 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [googleSubmitting, setGoogleSubmitting] = useState(false);
+
+  const redirectUri = AuthSession.makeRedirectUri({
+    useProxy: true,
+    projectNameForProxy: '@asad133/MexicanoApp',
+  } as any);
+
+  const discovery = {
+    authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenEndpoint: 'https://oauth2.googleapis.com/token',
+  };
+
+  const [request, response, promptAsync] = AuthSession.useAuthRequest(
+    {
+      clientId: GOOGLE_CLIENT_ID,
+      redirectUri,
+      scopes: ['openid', 'profile', 'email'],
+      responseType: AuthSession.ResponseType.Code,
+      usePKCE: false,
+      extraParams: {
+        access_type: 'offline',
+      },
+    },
+    discovery
+  );
 
   const handleLogin = async () => {
     const e = email.trim();
@@ -50,6 +80,43 @@ export default function LoginScreen() {
       /* toast handled elsewhere if needed */
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    console.log('=== GOOGLE DEBUG ===');
+    console.log('Client ID:', '323254530748-5ckfnahana1p9sllilmnv9v9mfjqpjch.apps.googleusercontent.com');
+    console.log('Redirect URI:', redirectUri);
+    console.log('Request object:', request);
+    alert('RedirectURI: ' + redirectUri);
+
+    if (googleSubmitting) return;
+
+    setGoogleSubmitting(true);
+    try {
+      const result = await promptAsync({ useProxy: true } as any);
+
+      if (!result || result.type !== 'success') {
+        console.log('Google sign-in cancelled.');
+        return;
+      }
+
+      const code =
+        String((result as any)?.params?.code ?? '').trim() ||
+        String((response as any)?.params?.code ?? '').trim();
+      if (!code) {
+        console.log('Google sign-in missing code.');
+        return;
+      }
+
+      await googleAuthCodeLogin({ code, redirectUri });
+      await getCurrentUser();
+      void registerForPushNotifications();
+      navigation.getParent()?.goBack();
+    } catch (e) {
+      console.log('Google sign-in failed', e);
+    } finally {
+      setGoogleSubmitting(false);
     }
   };
 
@@ -126,6 +193,28 @@ export default function LoginScreen() {
               <Text style={styles.primaryButtonText}>Log In</Text>
             )}
           </Pressable>
+
+          <View style={styles.dividerRow}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>OR</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          <Pressable
+            style={styles.socialButton}
+            onPress={() => void handleGoogleLogin()}
+            disabled={googleSubmitting}
+            accessibilityRole="button"
+            accessibilityLabel="Continue with Google"
+          >
+            {googleSubmitting ? (
+              <ActivityIndicator size="small" color={GOLD} />
+            ) : (
+              <Ionicons name="logo-google" size={18} color={TEXT_WHITE} />
+            )}
+            <Text style={styles.socialButtonText}>Continue with Google</Text>
+          </Pressable>
+
           <Pressable style={styles.linkRow} onPress={() => navigation.navigate('Register')}>
             <Text style={styles.linkText}>Create an account</Text>
           </Pressable>
@@ -236,5 +325,38 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: GOLD,
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 22,
+    marginBottom: 16,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  dividerText: {
+    marginHorizontal: 12,
+    fontSize: 12,
+    fontWeight: '500',
+    color: MUTED_TEXT,
+  },
+  socialButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: CARD_BG,
+    borderRadius: 12,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(254,185,72,0.25)',
+  },
+  socialButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: TEXT_WHITE,
   },
 });

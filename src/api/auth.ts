@@ -14,10 +14,17 @@ const GOOGLE_LOGIN_URL =
   (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_GOOGLE_LOGIN_URL) ||
   `${BASE_URL}/api/auth/google`;
 
+// Auth-code exchange endpoint (required by new Expo Google flow).
+// Default matches provided backend URL, but can be overridden via env.
+const GOOGLE_AUTH_CODE_URL =
+  (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_GOOGLE_AUTH_CODE_URL) ||
+  `https://phpstack-1046663-6238875.cloudwaysapps.com/auth/google`;
+
 const ENDPOINTS = {
   register: `${BASE_URL}/api/auth/register`,
   login: `${BASE_URL}/api/auth/login`,
   google: GOOGLE_LOGIN_URL,
+  googleAuthCode: GOOGLE_AUTH_CODE_URL,
   logout: `${BASE_URL}/api/auth/logout`,
 } as const;
 
@@ -79,6 +86,40 @@ export interface GoogleLoginResponse {
   token?: string;
   user?: { id?: string; email?: string; name?: string; phone?: string; role?: string; [key: string]: unknown };
   [key: string]: unknown;
+}
+
+export interface GoogleAuthCodePayload {
+  code: string;
+  redirectUri: string;
+}
+
+/**
+ * POST /auth/google – Expo auth-code flow
+ * Body: { code, redirectUri }
+ * Returns: { user, token } (token is saved locally via storagetank).
+ */
+export async function googleAuthCodeLogin(payload: GoogleAuthCodePayload): Promise<GoogleLoginResponse> {
+  const code = String(payload.code ?? '').trim();
+  const redirectUri = String(payload.redirectUri ?? '').trim();
+  if (!code || !redirectUri) throw new Error('Google sign-in failed. Missing authorization code.');
+
+  const res = await fetch(ENDPOINTS.googleAuthCode, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code, redirectUri }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(text || `Google login failed: ${res.status} ${res.statusText}`);
+  }
+
+  const data = (await res.json().catch(() => ({}))) as GoogleLoginResponse;
+  const token = data.token;
+  if (typeof token === 'string' && token.length > 0) {
+    await saveToken(token);
+  }
+  return data;
 }
 
 /**

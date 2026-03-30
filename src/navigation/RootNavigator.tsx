@@ -34,7 +34,7 @@ export type RootStackParamList = {
     longitude: number;
     formattedAddress: string;
   };
-  LoginRegister: { returnTo?: 'Checkout' } | undefined;
+  LoginRegister: { returnTo?: 'Checkout'; socialProvider?: 'google' } | undefined;
   Orders: { showOrderSuccessToast?: boolean; initialTab?: 'all' | 'current' | 'history' } | undefined;
   ViewOrderDetails: { orderId: string };
   Wishlist: undefined;
