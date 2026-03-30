@@ -10,14 +10,11 @@ import {
   Pressable,
   KeyboardAvoidingView,
   Platform,
-  Animated,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { submitContact } from '../../api/content';
 import VisitScreen from './VisitScreen';
 import { ContactScreenSkeleton } from '../../components/skeleton';
-
-const TOAST_DURATION = 2800;
 
 const TAB_BG = '#152C29';
 const BG_DARK = '#0B1D1B';
@@ -27,6 +24,8 @@ const INACTIVE = '#FFFFFF';
 const HORIZONTAL_PADDING = 20;
 const PLACEHOLDER_COLOR = 'rgba(255,255,255,0.5)';
 
+type ContactErrors = { phone?: string; email?: string; message?: string };
+
 export default function ContactScreen() {
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<'Contact' | 'Visit'>('Contact');
@@ -34,28 +33,14 @@ export default function ContactScreen() {
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const toastOpacity = useRef(new Animated.Value(0)).current;
   const [showContactSkeleton, setShowContactSkeleton] = useState(true);
   const [hasOpenedVisit, setHasOpenedVisit] = useState(false);
+  const [errors, setErrors] = useState<ContactErrors>({});
+  const [submitStatus, setSubmitStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setShowContactSkeleton(false), 200);
     return () => clearTimeout(t);
-  }, []);
-
-  useEffect(() => {
-    if (!toast) return;
-    toastOpacity.setValue(0);
-    Animated.sequence([
-      Animated.timing(toastOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
-      Animated.delay(TOAST_DURATION - 400),
-      Animated.timing(toastOpacity, { toValue: 0, duration: 200, useNativeDriver: true }),
-    ]).start(() => setToast(null));
-  }, [toast, toastOpacity]);
-
-  const showToast = useCallback((message: string, type: 'success' | 'error') => {
-    setToast({ message, type });
   }, []);
 
   const onTabChange = useCallback((tab: 'Contact' | 'Visit') => {
@@ -68,35 +53,34 @@ export default function ContactScreen() {
 
     const trimmedPhone = phone.trim();
     const trimmedEmail = email.trim();
+    const trimmedMessage = message.trim();
 
-    if (!trimmedPhone || !trimmedEmail) {
-      showToast('Please enter both phone number and email.', 'error');
-      return;
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(trimmedEmail)) {
-      showToast('Please enter a valid email address.', 'error');
-      return;
-    }
+    const nextErrors: ContactErrors = {};
+    if (!trimmedPhone) nextErrors.phone = 'Phone number is required.';
+    if (!trimmedEmail) nextErrors.email = 'Address is required.';
+    if (!trimmedMessage) nextErrors.message = 'Short message is required.';
+    setErrors(nextErrors);
+    setSubmitStatus(null);
+    if (Object.keys(nextErrors).length > 0) return;
 
     setSubmitting(true);
     try {
       await submitContact({
         phone: trimmedPhone,
         email: trimmedEmail,
-        message: message.trim() || undefined,
+        message: trimmedMessage,
       });
       setPhone('');
       setEmail('');
       setMessage('');
-      showToast('Thank you! Your message has been sent.', 'success');
+      setErrors({});
+      setSubmitStatus({ type: 'success', message: 'Thank you! Your message has been sent.' });
     } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Failed to submit', 'error');
+      setSubmitStatus({ type: 'error', message: e instanceof Error ? e.message : 'Failed to submit' });
     } finally {
       setSubmitting(false);
     }
-  }, [email, message, phone, showToast, submitting]);
+  }, [email, message, phone, submitting]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
@@ -150,35 +134,47 @@ export default function ContactScreen() {
                 placeholder="e.g. +1 234 567 8900"
                 placeholderTextColor={PLACEHOLDER_COLOR}
                 value={phone}
-                onChangeText={setPhone}
+                onChangeText={(v) => {
+                  setPhone(v);
+                  setErrors((prev) => ({ ...prev, phone: undefined }));
+                }}
                 keyboardType="phone-pad"
                 editable={!submitting}
               />
+              {errors.phone ? <Text style={styles.fieldError}>{errors.phone}</Text> : null}
 
-              <Text style={styles.label}>Email Address *</Text>
+              <Text style={styles.label}>Address *</Text>
               <TextInput
                 style={styles.input}
-                placeholder="e.g. hello@example.com"
+                placeholder="e.g. 742 Salsa Street, Dallas"
                 placeholderTextColor={PLACEHOLDER_COLOR}
                 value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
+                onChangeText={(v) => {
+                  setEmail(v);
+                  setErrors((prev) => ({ ...prev, email: undefined }));
+                }}
+                keyboardType="default"
+                autoCapitalize="words"
                 editable={!submitting}
               />
+              {errors.email ? <Text style={styles.fieldError}>{errors.email}</Text> : null}
 
-              <Text style={styles.label}>Short Message</Text>
+              <Text style={styles.label}>Short Message *</Text>
               <TextInput
                 style={[styles.input, styles.messageInput]}
                 placeholder="Your message..."
                 placeholderTextColor={PLACEHOLDER_COLOR}
                 value={message}
-                onChangeText={setMessage}
+                onChangeText={(v) => {
+                  setMessage(v);
+                  setErrors((prev) => ({ ...prev, message: undefined }));
+                }}
                 multiline
                 numberOfLines={4}
                 textAlignVertical="top"
                 editable={!submitting}
               />
+              {errors.message ? <Text style={styles.fieldError}>{errors.message}</Text> : null}
 
               <Pressable
                 style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
@@ -191,6 +187,11 @@ export default function ContactScreen() {
                   <Text style={styles.submitButtonText}>Submit</Text>
                 )}
               </Pressable>
+              {submitStatus ? (
+                <Text style={[styles.submitStatus, submitStatus.type === 'success' ? styles.submitStatusSuccess : styles.submitStatusError]}>
+                  {submitStatus.message}
+                </Text>
+              ) : null}
             </ScrollView>
           </KeyboardAvoidingView>
           )
@@ -201,27 +202,6 @@ export default function ContactScreen() {
           </View>
         ) : null}
       </View>
-
-      {toast ? (
-        <Animated.View
-          style={[
-            styles.toast,
-            {
-              bottom: insets.bottom + 88,
-            },
-            toast.type === 'success' ? styles.toastSuccess : styles.toastError,
-            { opacity: toastOpacity },
-          ]}
-          pointerEvents="none"
-        >
-          <Text
-            style={styles.toastText}
-            numberOfLines={2}
-          >
-            {toast.message}
-          </Text>
-        </Animated.View>
-      ) : null}
     </SafeAreaView>
   );
 }
@@ -300,6 +280,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: INACTIVE,
   },
+  fieldError: {
+    marginTop: -8,
+    marginBottom: 12,
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(239, 68, 68, 0.95)',
+  },
   messageInput: {
     minHeight: 80,
     paddingTop: 10,
@@ -321,31 +308,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: TAB_BG,
   },
-  toast: {
-    position: 'absolute',
-    left: HORIZONTAL_PADDING,
-    right: HORIZONTAL_PADDING,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    alignSelf: 'center',
-    maxWidth: '100%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  toastSuccess: {
-    backgroundColor: 'rgba(34, 197, 94, 0.95)',
-  },
-  toastError: {
-    backgroundColor: 'rgba(239, 68, 68, 0.95)',
-  },
-  toastText: {
-    fontSize: 13,
+  submitStatus: {
+    marginTop: -10,
+    marginBottom: 16,
+    fontSize: 12,
     fontWeight: '600',
-    color: '#fff',
     textAlign: 'center',
+  },
+  submitStatusSuccess: {
+    color: 'rgba(34, 197, 94, 0.95)',
+  },
+  submitStatusError: {
+    color: 'rgba(239, 68, 68, 0.95)',
   },
 });

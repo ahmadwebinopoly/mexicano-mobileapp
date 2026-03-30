@@ -247,7 +247,7 @@ function mapApiItemToMenuProduct(item: ApiMenuItem & { addons?: unknown[] }): Me
 
 export default function MenuScreen() {
   const insets = useSafeAreaInsets();
-  const { addItem } = useCart();
+  const { addItem, items: cartItems } = useCart();
   const [searchQuery, setSearchQuery] = useState('');
   const [menuProducts, setMenuProducts] = useState<MenuProduct[]>([]);
   const [loading, setLoading] = useState(true);
@@ -344,16 +344,16 @@ export default function MenuScreen() {
             next.delete(idStr);
             return next;
           });
-          showToast('Removed from wishlist', 'success');
+          showToast(`${item.name} is removed from wishlist`, 'success');
         } else {
           setWishlistIds((prev) => new Set(prev).add(idStr));
-          showToast('Added to wishlist', 'success');
+          showToast(`${item.name} is added to wishlist`, 'success');
         }
       } catch (e) {
         const msg = getNetworkErrorMessage(e);
         if (!wasInWishlist && /already|exists|duplicate/i.test(msg)) {
           setWishlistIds((prev) => new Set(prev).add(idStr));
-          showToast('Already in wishlist', 'error');
+          showToast(`${item.name} is already in wishlist`, 'error');
         } else {
           showToast(msg, 'error');
         }
@@ -370,6 +370,16 @@ export default function MenuScreen() {
 
   const handleQuickAddToCart = useCallback(
     (item: MenuProduct) => {
+      const alreadyInCart = cartItems.some((ci) => {
+        if (String(ci.productId) !== String(item.id)) return false;
+        const addonsEmpty = !Array.isArray(ci.addons) || ci.addons.length === 0;
+        const instructionsEmpty = String(ci.instructions ?? '').trim().length === 0;
+        return addonsEmpty && instructionsEmpty;
+      });
+      if (alreadyInCart) {
+        showToast(`${item.name} is already in cart`, 'error');
+        return;
+      }
       addItem({
         productId: String(item.id),
         name: item.name,
@@ -378,9 +388,9 @@ export default function MenuScreen() {
         addons: [],
         quantity: 1,
       });
-      showToast('Added to cart', 'success');
+      showToast(`${item.name} is added to cart`, 'success');
     },
-    [addItem, showToast]
+    [addItem, cartItems, showToast]
   );
 
   useEffect(() => {

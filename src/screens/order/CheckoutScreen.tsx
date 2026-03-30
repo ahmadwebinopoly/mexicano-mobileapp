@@ -6,6 +6,7 @@ import {
   Image,
   Keyboard,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -25,7 +26,14 @@ import { placeOrder } from '../../api/orders';
 import { getAppCurrency, getNetworkErrorMessage } from '../../api/apiConfig';
 import { useCart, type CartItem } from '../../contexts/CartContext';
 import { getCurrentUser } from '../../api/profile';
-import { getAddress } from '../../api/saveadresss';
+import {
+  getAddress,
+  getAllAddresses,
+  setAddressAsDefault,
+  type Address,
+} from '../../api/saveadresss';
+import { getVisit, type VisitLocation } from '../../api/content';
+import { getToken } from '../../storagetank';
 import { createPaymentIntent, getStripeConfig, verifyStripePaymentSuccess } from '../../api/stripe';
 import { getOrderModes } from '../../api/orderModes';
 import { CheckoutScreenSkeleton } from '../../components/skeleton';
@@ -106,6 +114,36 @@ function formatAddress(addr: { address?: string; city?: string; state?: string; 
   return parts.join(', ');
 }
 
+function formatDeliveryAddressLine(addr: Address): string {
+  const parts = [addr.address?.trim(), addr.state?.trim(), addr.zipCode?.trim()].filter(Boolean);
+  return parts.join(', ');
+}
+
+function formatDeliveryCityLine(addr: Address): string {
+  const v = addr.city?.trim();
+  return v ? String(v) : '';
+}
+
+function formatDeliveryCardExtraLine(addr: Address): string {
+  const parts: string[] = [];
+  const floor = addr.floor?.trim();
+  const homeNo = addr.homeNo?.trim();
+  if (floor) parts.push(`Floor: ${floor}`);
+  if (homeNo) parts.push(`Office no ${homeNo}`);
+
+  const stateZip = [addr.state?.trim(), addr.zipCode?.trim()].filter(Boolean).join(' ');
+  if (stateZip) parts.push(stateZip);
+
+  return parts.length ? parts.join(' • ') : '—';
+}
+
+function formatRestaurantAddressLine(loc: VisitLocation | null): string {
+  if (!loc) return '—';
+  const line2 = [loc.city, loc.state, loc.zip].filter((x) => x && String(x).trim()).join(', ');
+  const parts = [loc.address, line2].filter(Boolean);
+  return parts.length ? parts.join(', ') : '—';
+}
+
 function normalizeOrderErrorMessage(error: unknown): string {
   const raw = getNetworkErrorMessage(error);
   const text = String(raw ?? '').trim();
@@ -165,6 +203,15 @@ export default function CheckoutScreen() {
   const toastOpacity = useRef(new Animated.Value(0)).current;
   const [orderMode, setOrderMode] = useState<OrderMode>(null);
   const [deliveryFee, setDeliveryFee] = useState(0);
+  const [addresses, setAddresses] = useState<Address[]>([]);
+  const [defaultAddress, setDefaultAddress] = useState<Address | null>(null);
+  const [addressesLoading, setAddressesLoading] = useState(false);
+  const [chooseAddressModalVisible, setChooseAddressModalVisible] = useState(false);
+  const [pickerSelectedAddressId, setPickerSelectedAddressId] = useState<string | null>(null);
+  const [restaurantLocation, setRestaurantLocation] = useState<VisitLocation | null>(null);
+  const [visitLoading, setVisitLoading] = useState(false);
+
+  const lastSyncedDefaultAddressIdRef = useRef<string | null>(null);
   /** Extra bottom padding while keyboard is open so Stripe CardField + inputs scroll above the keyboard. */
   const [keyboardBottomInset, setKeyboardBottomInset] = useState(0);
 
@@ -203,6 +250,79 @@ export default function CheckoutScreen() {
       void loadOrderMode();
     }, [loadOrderMode])
   );
+
+  const loadDeliveryAddresses = React.useCallback(async () => {
+    if (orderMode !== 'delivery') return;
+    setAddressesLoading(true);
+    try {
+      const token = await getToken();
+      if (!token) {
+        setAddresses([]);
+        setDefaultAddress(null);
+        return;
+      }
+      const [all, def] = await Promise.all([getAllAddresses(), getAddress()]);
+      setAddresses(all);
+      setDefaultAddress(def);
+    } catch {
+      setAddresses([]);
+      setDefaultAddress(null);
+    } finally {
+      setAddressesLoading(false);
+    }
+  }, [orderMode]);
+
+  useEffect(() => {
+    if (orderMode !== 'delivery') {
+      setAddresses([]);
+      setDefaultAddress(null);
+      setAddressesLoading(false);
+      return;
+    }
+    void loadDeliveryAddresses();
+  }, [orderMode, loadDeliveryAddresses]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      if (orderMode !== 'delivery') return;
+      void loadDeliveryAddresses();
+    }, [loadDeliveryAddresses, orderMode])
+  );
+
+  useEffect(() => {
+    if (orderMode !== 'dining' && orderMode !== 'takeaway') {
+      setRestaurantLocation(null);
+      return;
+    }
+    let cancelled = false;
+    setVisitLoading(true);
+    (async () => {
+      try {
+        const visit = await getVisit();
+        if (!cancelled) setRestaurantLocation(visit.location);
+      } catch {
+        if (!cancelled) setRestaurantLocation(null);
+      } finally {
+        if (!cancelled) setVisitLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [orderMode]);
+
+  // Keep picker selection synced with the latest default address after returning to checkout
+  // (e.g., when user adds a new address from `AddressScreen`).
+  useEffect(() => {
+    if (!chooseAddressModalVisible) return;
+    if (addressesLoading) return;
+
+    const nextDefaultId = defaultAddress?.id ?? null;
+    if (nextDefaultId && lastSyncedDefaultAddressIdRef.current !== nextDefaultId) {
+      setPickerSelectedAddressId(nextDefaultId);
+      lastSyncedDefaultAddressIdRef.current = nextDefaultId;
+    }
+  }, [chooseAddressModalVisible, addressesLoading, defaultAddress]);
 
   useEffect(() => {
     let cancelled = false;
@@ -247,6 +367,17 @@ export default function CheckoutScreen() {
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type });
+  };
+
+  const chooseAddress = async (addressId: string) => {
+    try {
+      await setAddressAsDefault(addressId);
+      const def = await getAddress();
+      setDefaultAddress(def);
+      setChooseAddressModalVisible(false);
+    } catch {
+      /* keep current address */
+    }
   };
 
   const cartSubtotal = Number(total.toFixed(2));
@@ -548,146 +679,107 @@ export default function CheckoutScreen() {
           <CheckoutScreenSkeleton />
         ) : (
         <>
-        {/* Order summary */}
+        {/* 1 — Delivery address or restaurant / pick-up location */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Order summary</Text>
-          {items.length === 0 ? (
-            <View style={[styles.panel, styles.emptyState]}>
-              <MaterialIcons name="shopping-cart" size={40} color="rgba(255,255,255,0.35)" />
-              <Text style={styles.emptyStateText}>Your cart is empty</Text>
+          <Text style={[styles.sectionTitle, orderMode === 'delivery' ? styles.deliverySectionTitle : null]}>
+            {orderMode === 'delivery'
+              ? 'Delivery address'
+              : orderMode === 'dining' || orderMode === 'takeaway'
+                ? 'Restaurant location'
+                : 'Location'}
+          </Text>
+          {orderMode === 'delivery' ? (
+            <Text style={styles.locationSectionHint}>Where we're bringing your order.</Text>
+          ) : null}
+          {!orderMode ? (
+            <View style={[styles.panel, styles.locationLoadingWrap]}>
+              <ActivityIndicator size="small" color={GOLD} />
+            </View>
+          ) : orderMode === 'delivery' ? (
+            <View style={styles.deliveryPanel}>
+              {!isLoggedIn ? (
+                <Text style={styles.locationEmptyText}>
+                  Please sign in to use your saved delivery address.
+                </Text>
+              ) : addressesLoading ? (
+                <View style={styles.locationLoadingWrap}>
+                  <ActivityIndicator size="small" color={GOLD} />
+                </View>
+              ) : defaultAddress ? (
+                <View>
+                  <Pressable
+                    style={({ pressed }) => [styles.deliveryAddressCard, pressed && styles.deliveryAddressCardPressed]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Change delivery address"
+                    onPress={() => {
+                      setPickerSelectedAddressId(defaultAddress?.id ?? addresses[0]?.id ?? null);
+                      setChooseAddressModalVisible(true);
+                    }}
+                  >
+                    <View style={styles.deliveryCardTextWrap}>
+                      <Text style={styles.deliveryCardTitle} numberOfLines={1}>
+                        {defaultAddress.customerLocation || 'Delivery'}
+                      </Text>
+                      <Text style={styles.deliveryCardLine1} numberOfLines={2}>
+                        {defaultAddress.address?.trim() || 'Delivery'}
+                      </Text>
+                      {formatDeliveryCityLine(defaultAddress) ? (
+                        <Text style={styles.deliveryCardLine2} numberOfLines={1}>
+                          {formatDeliveryCityLine(defaultAddress)}
+                        </Text>
+                      ) : null}
+                      <Text style={styles.deliveryCardExtraLine} numberOfLines={2}>
+                        {formatDeliveryCardExtraLine(defaultAddress)}
+                      </Text>
+                    </View>
+
+                    <Ionicons name="chevron-forward" size={20} color={GOLD} />
+                  </Pressable>
+
+                </View>
+              ) : (
+                <View style={styles.locationEmptyWrap}>
+                  <Text style={styles.locationEmptyText}>No delivery address saved yet.</Text>
+                  <Pressable
+                    style={styles.locationAddBtn}
+                    onPress={() => navigation.navigate('Address')}
+                  >
+                    <Text style={styles.locationAddBtnText}>Add address</Text>
+                  </Pressable>
+                </View>
+              )}
             </View>
           ) : (
-            <View style={styles.summaryPanel}>
-              {items.map((cartItem, index) => (
-                <View
-                  key={cartItem.id}
-                  style={[styles.cartRow, index < items.length - 1 && styles.cartRowDivider]}
-                >
-                  <View style={styles.cartRowImageWrap}>
-                    {cartItem.image ? (
-                      <Image source={cartItem.image} style={styles.cartRowImage} resizeMode="cover" />
-                    ) : (
-                      <View style={styles.cartRowSkeleton}>
-                        <MaterialIcons name="image-not-supported" size={20} color="rgba(255,255,255,0.35)" />
-                      </View>
-                    )}
-                  </View>
-                  <View style={styles.cartRowBody}>
-                    <View style={styles.cartRowTitleRow}>
-                      <Text style={styles.cartRowName} numberOfLines={2}>
-                        {cartItem.name}
-                      </Text>
-                      <View style={styles.cartRowPriceBlock}>
-                        <Text style={styles.cartRowPrice}>
-                          {formatPrice(String(getLineTotal(cartItem).toFixed(2)))}
-                        </Text>
-                        <Text style={styles.qtyReadonly}>×{cartItem.quantity}</Text>
-                      </View>
-                    </View>
-                    {String(cartItem.instructions ?? '').trim() ? (
-                      <TextInput
-                        editable={false}
-                        multiline
-                        scrollEnabled={false}
-                        value={`Notes: ${String(cartItem.instructions).trim()}`}
-                        style={styles.cartNotesField}
-                      />
-                    ) : null}
-                    {Array.isArray(cartItem.addons) && cartItem.addons.length > 0 ? (
-                      <View style={styles.cartAddonList}>
-                        {cartItem.addons.map((addon) => (
-                          <View key={`${cartItem.id}-${addon.id}`} style={styles.cartAddonRow}>
-                            <View style={styles.cartAddonImageWrap}>
-                              {addon.image ? (
-                                <Image
-                                  source={typeof addon.image === 'string' ? { uri: addon.image } : addon.image}
-                                  style={styles.cartAddonImage}
-                                  resizeMode="cover"
-                                />
-                              ) : (
-                                <MaterialIcons name="image-not-supported" size={14} color="rgba(255,255,255,0.45)" />
-                              )}
-                            </View>
-                            <View style={styles.cartAddonMeta}>
-                              <Text style={styles.cartAddonName} numberOfLines={1}>
-                                {addon.name}
-                              </Text>
-                              <View style={styles.cartAddonMetaRow}>
-                                <Text style={styles.cartAddonPrice}>
-                                  {formatPrice(String((parsePrice(addon.price) * cartItem.quantity).toFixed(2)))}
-                                </Text>
-                                <Text style={styles.cartAddonQty}>×{cartItem.quantity}</Text>
-                              </View>
-                            </View>
-                          </View>
-                        ))}
-                      </View>
-                    ) : null}
-                  </View>
+            <View style={styles.panel}>
+              {visitLoading ? (
+                <View style={styles.locationLoadingWrap}>
+                  <ActivityIndicator size="small" color={GOLD} />
                 </View>
-              ))}
+              ) : (
+                <>
+                  {restaurantLocation?.name ? (
+                    <Text style={styles.restaurantLocName}>{restaurantLocation.name}</Text>
+                  ) : null}
+                  <Text style={styles.restaurantLocAddress}>
+                    {formatRestaurantAddressLine(restaurantLocation)}
+                  </Text>
+                  {restaurantLocation?.mapsUrl ? (
+                    <Pressable
+                      onPress={() => {
+                        const u = String(restaurantLocation.mapsUrl).replace(/&output=embed/, '');
+                        Linking.openURL(u).catch(() => {});
+                      }}
+                    >
+                      <Text style={styles.locationOpenMaps}>Open in Maps</Text>
+                    </Pressable>
+                  ) : null}
+                </>
+              )}
             </View>
           )}
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Order notes</Text>
-          <TextInput
-            style={styles.notesInput}
-            placeholder="Extra salsa, no onions, etc."
-            placeholderTextColor={MUTED_TEXT}
-            value={notes}
-            onChangeText={setNotes}
-            multiline
-            numberOfLines={3}
-          />
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Discount code</Text>
-          <View style={styles.discountRow}>
-            <TextInput
-              style={styles.discountInput}
-              placeholder="Enter code"
-              placeholderTextColor={MUTED_TEXT}
-              value={discountCode}
-              onChangeText={(t) => {
-                setDiscountCode(t);
-                setDiscountApplied(false);
-                setDiscountPreview(null);
-              }}
-              autoCapitalize="characters"
-              autoCorrect={false}
-              returnKeyType="done"
-              onSubmitEditing={handleApplyDiscount}
-            />
-            <Pressable
-              style={({ pressed }) => [
-                styles.discountSendBtn,
-                pressed && styles.discountSendBtnPressed,
-                discountApplying && styles.discountSendBtnDisabled,
-              ]}
-              onPress={() => void handleApplyDiscount()}
-              hitSlop={6}
-              disabled={discountApplying}
-              accessibilityLabel="Apply discount code"
-            >
-              {discountApplying ? (
-                <ActivityIndicator size="small" color={BG_DARK} />
-              ) : (
-                <Ionicons name="send" size={20} color={BG_DARK} />
-              )}
-            </Pressable>
-          </View>
-          {discountPreviewValid && discountPreview ? (
-            <Text style={styles.discountAppliedHint}>
-              {discountPreview.discountAmount > 0
-                ? `You save ${formatPrice(discountPreview.discountAmount.toFixed(2))} — new total ${formatPrice(payableTotal.toFixed(2))}.`
-                : `New total ${formatPrice(payableTotal.toFixed(2))}.`}
-            </Text>
-          ) : null}
-        </View>
-
+        {/* 2 — Payment */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Payment</Text>
           <View style={styles.panel}>
@@ -772,6 +864,148 @@ export default function CheckoutScreen() {
           </View>
         </View>
 
+        {/* 3 — Order summary */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Order summary</Text>
+          {items.length === 0 ? (
+            <View style={[styles.panel, styles.emptyState]}>
+              <MaterialIcons name="shopping-cart" size={40} color="rgba(255,255,255,0.35)" />
+              <Text style={styles.emptyStateText}>Your cart is empty</Text>
+            </View>
+          ) : (
+            <View style={styles.summaryPanel}>
+              {items.map((cartItem, index) => (
+                <View
+                  key={cartItem.id}
+                  style={[styles.cartRow, index < items.length - 1 && styles.cartRowDivider]}
+                >
+                  <View style={styles.cartRowImageWrap}>
+                    {cartItem.image ? (
+                      <Image source={cartItem.image} style={styles.cartRowImage} resizeMode="cover" />
+                    ) : (
+                      <View style={styles.cartRowSkeleton}>
+                        <MaterialIcons name="image-not-supported" size={20} color="rgba(255,255,255,0.35)" />
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.cartRowBody}>
+                    <View style={styles.cartRowTitleRow}>
+                      <Text style={styles.cartRowName} numberOfLines={2}>
+                        {cartItem.name}
+                      </Text>
+                      <View style={styles.cartRowPriceBlock}>
+                        <Text style={styles.cartRowPrice}>
+                          {formatPrice(String(getLineTotal(cartItem).toFixed(2)))}
+                        </Text>
+                        <Text style={styles.qtyReadonly}>×{cartItem.quantity}</Text>
+                      </View>
+                    </View>
+                    {String(cartItem.instructions ?? '').trim() ? (
+                      <TextInput
+                        editable={false}
+                        multiline
+                        scrollEnabled={false}
+                        value={`Notes: ${String(cartItem.instructions).trim()}`}
+                        style={styles.cartNotesField}
+                      />
+                    ) : null}
+                    {Array.isArray(cartItem.addons) && cartItem.addons.length > 0 ? (
+                      <View style={styles.cartAddonList}>
+                        {cartItem.addons.map((addon) => (
+                          <View key={`${cartItem.id}-${addon.id}`} style={styles.cartAddonRow}>
+                            <View style={styles.cartAddonImageWrap}>
+                              {addon.image ? (
+                                <Image
+                                  source={typeof addon.image === 'string' ? { uri: addon.image } : addon.image}
+                                  style={styles.cartAddonImage}
+                                  resizeMode="cover"
+                                />
+                              ) : (
+                                <MaterialIcons name="image-not-supported" size={14} color="rgba(255,255,255,0.45)" />
+                              )}
+                            </View>
+                            <View style={styles.cartAddonMeta}>
+                              <Text style={styles.cartAddonName} numberOfLines={1}>
+                                {addon.name}
+                              </Text>
+                              <View style={styles.cartAddonMetaRow}>
+                                <Text style={styles.cartAddonPrice}>
+                                  {formatPrice(String((parsePrice(addon.price) * cartItem.quantity).toFixed(2)))}
+                                </Text>
+                                <Text style={styles.cartAddonQty}>×{cartItem.quantity}</Text>
+                              </View>
+                            </View>
+                          </View>
+                        ))}
+                      </View>
+                    ) : null}
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+
+        {orderMode && orderMode !== 'delivery' ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Order notes</Text>
+            <TextInput
+              style={styles.notesInput}
+              placeholder="Extra salsa, no onions, etc."
+              placeholderTextColor={MUTED_TEXT}
+              value={notes}
+              onChangeText={setNotes}
+              multiline
+              numberOfLines={3}
+            />
+          </View>
+        ) : null}
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Discount code</Text>
+          <View style={styles.discountRow}>
+            <TextInput
+              style={styles.discountInput}
+              placeholder="Enter code"
+              placeholderTextColor={MUTED_TEXT}
+              value={discountCode}
+              onChangeText={(t) => {
+                setDiscountCode(t);
+                setDiscountApplied(false);
+                setDiscountPreview(null);
+              }}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              returnKeyType="done"
+              onSubmitEditing={handleApplyDiscount}
+            />
+            <Pressable
+              style={({ pressed }) => [
+                styles.discountSendBtn,
+                pressed && styles.discountSendBtnPressed,
+                discountApplying && styles.discountSendBtnDisabled,
+              ]}
+              onPress={() => void handleApplyDiscount()}
+              hitSlop={6}
+              disabled={discountApplying}
+              accessibilityLabel="Apply discount code"
+            >
+              {discountApplying ? (
+                <ActivityIndicator size="small" color={BG_DARK} />
+              ) : (
+                <Ionicons name="send" size={20} color={BG_DARK} />
+              )}
+            </Pressable>
+          </View>
+          {discountPreviewValid && discountPreview ? (
+            <Text style={styles.discountAppliedHint}>
+              {discountPreview.discountAmount > 0
+                ? `You save ${formatPrice(discountPreview.discountAmount.toFixed(2))} — new total ${formatPrice(payableTotal.toFixed(2))}.`
+                : `New total ${formatPrice(payableTotal.toFixed(2))}.`}
+            </Text>
+          ) : null}
+        </View>
+
         {items.length > 0 ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Total bill</Text>
@@ -833,6 +1067,110 @@ export default function CheckoutScreen() {
       </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
+
+      <Modal
+        visible={chooseAddressModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setChooseAddressModalVisible(false)}
+      >
+        <SafeAreaView style={styles.addressModalBackdrop} edges={['top', 'bottom', 'left', 'right']}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setChooseAddressModalVisible(false)} />
+          <View style={styles.addressModalCard}>
+            <Text style={styles.addressModalTitle}>Delivery address</Text>
+            <Text style={styles.addressModalSubtitle}>Select a saved address or add a new one.</Text>
+
+            {addressesLoading ? (
+              <View style={styles.addressModalLoading}>
+                <ActivityIndicator size="small" color={GOLD} />
+              </View>
+            ) : (
+              <ScrollView
+                style={styles.addressModalScroll}
+                contentContainerStyle={styles.addressModalScrollContent}
+                showsVerticalScrollIndicator={false}
+              >
+                {addresses.length === 0 ? (
+                  <View style={styles.addressModalEmpty}>
+                    <Ionicons name="location-outline" size={26} color="rgba(255,255,255,0.35)" />
+                    <Text style={styles.addressModalEmptyTitle}>No saved address</Text>
+                    <Text style={styles.addressModalEmptySubtitle}>Tap “Add a new address” to save one.</Text>
+                  </View>
+                ) : (
+                  addresses.map((addr) => {
+                    const isSelected = addr.id === pickerSelectedAddressId;
+                    return (
+                      <Pressable
+                        key={addr.id}
+                        style={[styles.addressOption, isSelected && styles.addressOptionSelected]}
+                        onPress={() => setPickerSelectedAddressId(addr.id)}
+                      >
+                        <View style={[styles.addressRadioOuter, isSelected && styles.addressRadioOuterSelected]}>
+                          {isSelected ? <View style={styles.addressRadioInner} /> : null}
+                        </View>
+
+                        <View style={styles.addressOptionTextWrap}>
+                          <Text style={styles.addressOptionTitle} numberOfLines={1}>
+                            {addr.customerLocation || 'Delivery'}
+                          </Text>
+                          <Text style={styles.addressOptionSubtitle} numberOfLines={2}>
+                            {formatDeliveryAddressLine(addr)}
+                          </Text>
+                        </View>
+
+                        <Pressable
+                          hitSlop={6}
+                          style={styles.addressOptionEditBtn}
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            setChooseAddressModalVisible(false);
+                            navigation.navigate('Address');
+                          }}
+                        >
+                          <Ionicons name="create-outline" size={18} color={GOLD} />
+                        </Pressable>
+                      </Pressable>
+                    );
+                  })
+                )}
+              </ScrollView>
+            )}
+
+            <Pressable
+              style={styles.addressModalAddNewBtn}
+              onPress={() => {
+                setChooseAddressModalVisible(false);
+                navigation.navigate('Address', { openAddModal: true, returnToCheckout: true });
+              }}
+            >
+              <Ionicons name="add" size={20} color={GOLD} />
+              <Text style={styles.addressModalAddNewText}>Add a new address</Text>
+            </Pressable>
+
+            <View style={styles.addressModalActionRow}>
+              <Pressable
+                style={styles.addressModalCancelBtn}
+                onPress={() => setChooseAddressModalVisible(false)}
+              >
+                <Text style={styles.addressModalCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={styles.addressModalApplyBtn}
+                onPress={() => {
+                  const target = pickerSelectedAddressId ?? defaultAddress?.id;
+                  if (!target) {
+                    setChooseAddressModalVisible(false);
+                    return;
+                  }
+                  void chooseAddress(target);
+                }}
+              >
+                <Text style={styles.addressModalApplyText}>Apply</Text>
+              </Pressable>
+            </View>
+          </View>
+        </SafeAreaView>
+      </Modal>
 
       {/* Login required modal – same pattern as Profile "My Addresses" */}
       {showLoginGate && !loginModalDismissed && (
@@ -1026,6 +1364,380 @@ const styles = StyleSheet.create({
   },
   section: {
     marginBottom: 14,
+  },
+  locationSectionHint: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: MUTED_TEXT,
+    marginBottom: 10,
+    marginTop: -2,
+  },
+  locationLoadingWrap: {
+    paddingVertical: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  locationEmptyWrap: {
+    gap: 12,
+    alignItems: 'flex-start',
+  },
+  deliveryPanel: {
+    padding: 0,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+  },
+  deliverySectionTitle: {
+    textTransform: 'none',
+  },
+  locationEmptyText: {
+    fontSize: 13,
+    color: MUTED_TEXT,
+    lineHeight: 18,
+  },
+  locationAddBtn: {
+    backgroundColor: GOLD,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  locationAddBtnText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: BG_DARK,
+  },
+  deliveryBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  deliveryBarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 10,
+    minWidth: 0,
+  },
+  deliveryBarTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  deliveryBarTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: TEXT_WHITE,
+    marginBottom: 2,
+  },
+  deliveryBarSubtitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.75)',
+  },
+  deliveryBarChangeBtn: {
+    marginLeft: 10,
+    backgroundColor: GOLD,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+  },
+  deliveryBarChangeText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: BG_DARK,
+  },
+  deliveryAddressCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: CARD_BG,
+    borderRadius: 18,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(229,185,72,0.22)',
+  },
+  deliveryAddressCardPressed: {
+    opacity: 0.92,
+  },
+  deliveryCardThumb: {
+    width: 72,
+    height: 72,
+    borderRadius: 16,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+    overflow: 'hidden',
+  },
+  deliveryCardThumbPin: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  deliveryCardTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  deliveryCardTitle: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: TEXT_WHITE,
+    marginBottom: 2,
+  },
+  deliveryCardLine1: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: TEXT_WHITE,
+    lineHeight: 18,
+  },
+  deliveryCardLine2: {
+    marginTop: 2,
+    fontSize: 13,
+    fontWeight: '700',
+    color: MUTED_TEXT,
+    lineHeight: 18,
+  },
+  deliveryCardExtraLine: {
+    marginTop: 2,
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.75)',
+    lineHeight: 18,
+  },
+  deliveryCardActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    paddingHorizontal: 8,
+  },
+  deliveryCardActionText: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: GOLD,
+  },
+  deliveryInstructionsWrap: {
+    marginTop: 12,
+    backgroundColor: CARD_BG,
+    borderRadius: 16,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(229,185,72,0.22)',
+  },
+  deliveryInstructionsLabel: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: MUTED_TEXT,
+    marginBottom: 8,
+    lineHeight: 18,
+  },
+  deliveryInstructionsInput: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(229,185,72,0.18)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minHeight: 56,
+    fontSize: 13,
+    fontWeight: '700',
+    color: TEXT_WHITE,
+    lineHeight: 18,
+    textAlignVertical: 'top',
+  },
+  restaurantLocName: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: TEXT_WHITE,
+    marginBottom: 6,
+  },
+  restaurantLocAddress: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: MUTED_TEXT,
+    marginBottom: 8,
+  },
+  locationOpenMaps: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: GOLD,
+  },
+  addressModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  addressModalCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: CARD_BG,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(254, 203, 77, 0.25)',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 10,
+    maxHeight: '80%',
+  },
+  addressModalTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: TEXT_WHITE,
+    marginBottom: 4,
+  },
+  addressModalSubtitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.65)',
+    marginBottom: 12,
+  },
+  addressModalLoading: {
+    paddingVertical: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addressModalScroll: {
+    width: '100%',
+    flexGrow: 0,
+  },
+  addressModalScrollContent: {
+    paddingBottom: 10,
+  },
+  addressOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    marginBottom: 10,
+  },
+  addressOptionSelected: {
+    borderColor: 'rgba(254,203,77,0.65)',
+    backgroundColor: 'rgba(254,203,77,0.10)',
+  },
+  addressRadioOuter: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 2,
+  },
+  addressRadioOuterSelected: {
+    borderColor: GOLD,
+  },
+  addressRadioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: GOLD,
+  },
+  addressOptionTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  addressOptionTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: TEXT_WHITE,
+    marginBottom: 2,
+  },
+  addressOptionSubtitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.7)',
+  },
+  addressOptionNote: {
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.5)',
+  },
+  addressOptionEditBtn: {
+    padding: 6,
+    marginLeft: 8,
+  },
+  addressModalEmpty: {
+    paddingVertical: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  addressModalEmptyTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: TEXT_WHITE,
+  },
+  addressModalEmptySubtitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.65)',
+    textAlign: 'center',
+    lineHeight: 18,
+    paddingHorizontal: 20,
+  },
+  addressModalAddNewBtn: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(254,203,77,0.25)',
+    paddingVertical: 12,
+  },
+  addressModalAddNewText: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: GOLD,
+  },
+  addressModalActionRow: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  addressModalCancelBtn: {
+    flex: 1,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addressModalCancelText: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: TEXT_WHITE,
+  },
+  addressModalApplyBtn: {
+    flex: 1,
+    borderRadius: 14,
+    backgroundColor: GOLD,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addressModalApplyText: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: BG_DARK,
   },
   panel: {
     backgroundColor: CARD_BG,

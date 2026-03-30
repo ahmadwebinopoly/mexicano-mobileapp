@@ -124,6 +124,8 @@ export interface SubmitReviewPayload {
   dishRating: number;
   dishTag?: string;
   comment?: string;
+  /** Optional: array of image data or URLs supported by backend. */
+  photoUrls?: string[];
   experience: {
     foodQuality: number;
     deliverySpeed?: number;
@@ -259,6 +261,7 @@ export async function submitReview(payload: SubmitReviewPayload): Promise<Submit
     dishRating: payload.dishRating,
     dishTag: payload.dishTag?.trim() || undefined,
     comment: payload.comment?.trim() || undefined,
+    photoUrls: payload.photoUrls?.length ? payload.photoUrls : undefined,
     experience: payload.experience,
   };
 

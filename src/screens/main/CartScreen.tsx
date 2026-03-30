@@ -13,6 +13,7 @@ import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useCart, type CartItem } from '../../contexts/CartContext';
 import { CartScreenSkeleton } from '../../components/skeleton';
+import type { ItemDetailParamItem } from './ItemDetailScreen';
 
 const BG_DARK = '#0B1D1B';
 const CARD_BG = '#152C29';
@@ -37,6 +38,24 @@ function getLineTotal(item: CartItem): number {
   const main = parsePrice(item.price) * item.quantity;
   const addonsSum = addonsList.reduce((sum, ad) => sum + parsePrice(ad.price) * item.quantity, 0);
   return main + addonsSum;
+}
+
+function mapCartItemToItemDetailParam(item: CartItem): ItemDetailParamItem {
+  return {
+    id: String(item.productId),
+    name: String(item.name ?? ''),
+    description: 'Delicious Mexican-style dish.',
+    price: String(item.price ?? ''),
+    image: item.image ?? null,
+    addons: Array.isArray(item.addons)
+      ? item.addons.map((a) => ({
+          id: a.id,
+          name: a.name,
+          price: a.price,
+          image: a.image == null ? undefined : a.image,
+        }))
+      : [],
+  };
 }
 
 export default function CartScreen() {
@@ -76,8 +95,19 @@ export default function CartScreen() {
           </View>
         ) : (
           items.map((cartItem) => (
-            <View key={cartItem.id} style={styles.cartGroupCard}>
-            <View style={styles.cartCard}>
+            <Pressable
+              key={cartItem.id}
+              style={styles.cartGroupCard}
+              onPress={() => {
+                const paramItem = mapCartItemToItemDetailParam(cartItem);
+                // CartScreen is already in RootNavigator stack, so navigate directly.
+                // (Using getParent() can be null here and would no-op.)
+                navigation.navigate('ItemDetail', { item: paramItem, cartItemId: cartItem.id });
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={`View ${cartItem.name}`}
+            >
+            <View style={styles.cartCard} pointerEvents="box-none">
               <View style={styles.cartCardImageWrap}>
                 {cartItem.image ? (
                   <Image
@@ -113,14 +143,20 @@ export default function CartScreen() {
                   {cartItem.quantity <= 1 ? (
                     <Pressable
                       style={styles.quantityBtn}
-                      onPress={() => removeItem(cartItem.id)}
+                      onPress={(e) => {
+                        e.stopPropagation?.();
+                        removeItem(cartItem.id);
+                      }}
                     >
                       <MaterialIcons name="delete-outline" size={20} color={BG_DARK} />
                     </Pressable>
                   ) : (
                     <Pressable
                       style={styles.quantityBtn}
-                      onPress={() => updateQuantity(cartItem.id, cartItem.quantity - 1)}
+                      onPress={(e) => {
+                        e.stopPropagation?.();
+                        updateQuantity(cartItem.id, cartItem.quantity - 1);
+                      }}
                     >
                       <Text style={styles.quantityBtnText}>−</Text>
                     </Pressable>
@@ -130,7 +166,10 @@ export default function CartScreen() {
                   </View>
                   <Pressable
                     style={styles.quantityBtn}
-                    onPress={() => updateQuantity(cartItem.id, cartItem.quantity + 1)}
+                    onPress={(e) => {
+                      e.stopPropagation?.();
+                      updateQuantity(cartItem.id, cartItem.quantity + 1);
+                    }}
                   >
                     <Text style={styles.quantityBtnText}>+</Text>
                   </Pressable>
@@ -164,7 +203,7 @@ export default function CartScreen() {
                   </View>
                 </View>
               ))}
-            </View>
+            </Pressable>
           ))
         )}
         <View style={styles.bottomSpacer} />

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -322,7 +322,7 @@ function buildMenuSections(
 
 export default function DiscoverScreen() {
   const insets = useSafeAreaInsets();
-  const { addItem, itemCount } = useCart();
+  const { addItem, itemCount, items: cartItems } = useCart();
   const [searchQuery, setSearchQuery] = useState('');
   const [fullAddress, setFullAddress] = useState('');
   const [orderMode, setOrderMode] = useState<OrderMode>('delivery');
@@ -485,6 +485,16 @@ export default function DiscoverScreen() {
 
   const handleQuickAdd = useCallback(
     (item: DiscoverMenuItem) => {
+      const alreadyInCart = cartItems.some((ci) => {
+        if (String(ci.productId) !== String(item.id)) return false;
+        const addonsEmpty = !Array.isArray(ci.addons) || ci.addons.length === 0;
+        const instructionsEmpty = String(ci.instructions ?? '').trim().length === 0;
+        return addonsEmpty && instructionsEmpty;
+      });
+      if (alreadyInCart) {
+        showToast(`${item.name} is already in cart`, 'error');
+        return;
+      }
       addItem({
         productId: String(item.id),
         name: item.name,
@@ -493,9 +503,9 @@ export default function DiscoverScreen() {
         addons: [],
         quantity: 1,
       });
-      showToast('Added to cart', 'success');
+      showToast(`${item.name} is added to cart`, 'success');
     },
-    [addItem, showToast]
+    [addItem, cartItems, showToast]
   );
   const mainListRef = useRef<SectionList<DiscoverGridRow>>(null);
   const tabsScrollRef = useRef<ScrollView>(null);
@@ -636,6 +646,9 @@ export default function DiscoverScreen() {
       let active = true;
       (async () => {
         try {
+          // Keep wishlist/login state fresh whenever user visits this screen.
+          await loadWishlist();
+
           const mode = await readOrderModeFromStorage();
           if (!active) return;
           setOrderMode(mode);
@@ -670,9 +683,6 @@ export default function DiscoverScreen() {
           setRestaurantState((visit.location?.state || '').trim());
           setRestaurantZipCode((visit.location?.zip || '').trim());
           setRestaurantMapsUrl(visit.location?.mapsUrl ?? null);
-
-          // Keep wishlist state fresh while user is on this screen.
-          await loadWishlist();
         } catch {
           if (!active) return;
           // Fallback to delivery address if mode/location fetch fails.
@@ -1065,14 +1075,57 @@ export default function DiscoverScreen() {
     [scrollTabsToIndex, showStickyTabs]
   );
 
-  /** Default to 2nd banner centered (slide 1 peek left, slide 3 peek right when n ≥ 3). */
+  const bannerCarouselItems = useMemo(() => {
+    // For 3+ banners, render a looping list to avoid empty peek space on ends.
+    if (bannerSources.length >= 3) {
+      const first = bannerSources[0];
+      const last = bannerSources[bannerSources.length - 1];
+      return [last, ...bannerSources, first];
+    }
+    return bannerSources;
+  }, [bannerSources]);
+
+  const bannerLoopEnabled = bannerSources.length >= 3;
+
+  /** Default scroll position:
+   * - 1 banner: no carousel
+   * - 2 banners: start at first (so 2nd peeks on right)
+   * - 3+ banners: start at "2nd real banner" (index 2 in looped array)
+   */
   const onBannerCarouselContentSizeChange = useCallback(() => {
     if (bannerSources.length <= 1) return;
     const key = bannerSources.map((b) => b.id).join('|');
     if (bannerDefaultScrollKeyRef.current === key) return;
     bannerDefaultScrollKeyRef.current = key;
-    bannerCarouselRef.current?.scrollTo({ x: BANNER_SNAP_INTERVAL, animated: false });
+    // If only 2 banners exist, start on the 1st banner so the 2nd peeks on the right.
+    if (bannerSources.length === 2) {
+      bannerCarouselRef.current?.scrollTo({ x: 0, animated: false });
+      return;
+    }
+    // For 3+ banners (looped), start on the 2nd *real* banner (index 2).
+    bannerCarouselRef.current?.scrollTo({ x: BANNER_SNAP_INTERVAL * 2, animated: false });
   }, [bannerSources]);
+
+  const onBannerCarouselMomentumEnd = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (!bannerLoopEnabled) return;
+      const x = e.nativeEvent.contentOffset.x;
+      const index = Math.round(x / BANNER_SNAP_INTERVAL);
+      const n = bannerSources.length; // real count
+      if (n < 3) return;
+
+      // looped array indices:
+      // 0 = last (dup), 1..n = real, n+1 = first (dup)
+      if (index === 0) {
+        // jumped to dup last -> go to real last
+        bannerCarouselRef.current?.scrollTo({ x: BANNER_SNAP_INTERVAL * n, animated: false });
+      } else if (index === n + 1) {
+        // jumped to dup first -> go to real first
+        bannerCarouselRef.current?.scrollTo({ x: BANNER_SNAP_INTERVAL * 1, animated: false });
+      }
+    },
+    [bannerLoopEnabled, bannerSources.length]
+  );
 
   const renderTabs = () => (
     <ScrollView
@@ -1515,17 +1568,21 @@ export default function DiscoverScreen() {
         ListHeaderComponent={(
           <>
             {/* Banner (scrolls away) */}
-            <View style={styles.bannerWrap}>
+            <View style={[styles.bannerWrap, bannerSources.length === 1 ? styles.bannerWrapSingle : null]}>
               {bannerLoading ? (
                 <View style={styles.bannerLoadingWrap}>
                   <View style={styles.bannerLoadingSkeletonWrap}>
-                    <SkeletonBox width={BANNER_WIDTH} height={BANNER_HEIGHT} borderRadius={12} />
+                    <SkeletonBox
+                      width={bannerSources.length === 1 ? SCREEN_WIDTH : BANNER_WIDTH}
+                      height={BANNER_HEIGHT}
+                      borderRadius={bannerSources.length === 1 ? 0 : 12}
+                    />
                   </View>
                 </View>
               ) : bannerSources.length > 0 ? (
                 <View style={styles.bannerInnerWrap}>
                   {bannerSources.length === 1 ? (
-                    <View style={styles.bannerSlide}>
+                    <View style={[styles.bannerSlide, styles.bannerSlideSingle]}>
                       <Image source={bannerSources[0].source} style={styles.bannerImage} resizeMode="cover" />
                     </View>
                   ) : (
@@ -1540,13 +1597,14 @@ export default function DiscoverScreen() {
                       scrollEventThrottle={16}
                       contentContainerStyle={styles.bannerCarouselContent}
                       onContentSizeChange={onBannerCarouselContentSizeChange}
+                      onMomentumScrollEnd={onBannerCarouselMomentumEnd}
                     >
-                      {bannerSources.map((b, index) => (
+                      {bannerCarouselItems.map((b, index) => (
                         <View
-                          key={b.id}
+                          key={`${b.id}-${index}`}
                           style={[
                             styles.bannerSlidePeek,
-                            index < bannerSources.length - 1 ? { marginRight: BANNER_GAP } : null,
+                            index < bannerCarouselItems.length - 1 ? { marginRight: BANNER_GAP } : null,
                           ]}
                         >
                           <Image source={b.source} style={styles.bannerImage} resizeMode="cover" />
@@ -1863,11 +1921,21 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
   },
+  // When backend returns only 1 banner, show it full-width (no card container).
+  bannerWrapSingle: {
+    backgroundColor: 'transparent',
+    borderRadius: 0,
+    marginHorizontal: -HORIZONTAL_PADDING,
+  },
   bannerSlide: {
     width: BANNER_WIDTH,
     height: BANNER_HEIGHT,
     borderRadius: 12,
     overflow: 'hidden',
+  },
+  bannerSlideSingle: {
+    width: SCREEN_WIDTH,
+    borderRadius: 0,
   },
   bannerCarouselContent: {
     paddingHorizontal: BANNER_PEEK,

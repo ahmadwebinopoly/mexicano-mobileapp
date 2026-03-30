@@ -7,7 +7,16 @@ const HORIZONTAL_PADDING = 20;
 export function CheckoutScreenSkeleton() {
   return (
     <View style={styles.content}>
-      <SkeletonBox width={140} height={14} style={styles.sectionTitle} />
+      <SkeletonBox width={160} height={14} style={styles.sectionTitle} />
+      <View style={styles.locationPanel}>
+        <SkeletonBox width="100%" height={48} borderRadius={12} />
+      </View>
+      <SkeletonBox width={90} height={14} style={[styles.sectionTitle, styles.sectionTitleTop]} />
+      <View style={styles.paymentPanel}>
+        <SkeletonBox width="100%" height={56} borderRadius={14} style={{ marginBottom: 8 }} />
+        <SkeletonBox width="100%" height={56} borderRadius={14} />
+      </View>
+      <SkeletonBox width={140} height={14} style={[styles.sectionTitle, styles.sectionTitleTop]} />
       {[1, 2].map((i) => (
         <View key={i} style={styles.cartRow}>
           <SkeletonBox width={56} height={56} borderRadius={10} />
@@ -26,7 +35,6 @@ export function CheckoutScreenSkeleton() {
         </View>
       ))}
 
-      <SkeletonBox width={120} height={14} style={[styles.sectionTitle, styles.sectionTitleTop]} />
     </View>
   );
 }
@@ -40,7 +48,13 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   sectionTitleTop: {
-    marginTop: 24,
+    marginTop: 20,
+  },
+  locationPanel: {
+    marginBottom: 8,
+  },
+  paymentPanel: {
+    marginBottom: 8,
   },
   cartRow: {
     flexDirection: 'row',

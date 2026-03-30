@@ -24,6 +24,7 @@ type CartContextValue = {
   addItem: (item: Omit<CartItem, 'id' | 'quantity'> & { quantity?: number }) => void;
   removeItem: (id: string) => void;
   updateQuantity: (id: string, quantity: number) => void;
+  updateItemDetails: (id: string, patch: { quantity?: number; addons?: CartAddon[]; instructions?: string | undefined }) => void;
   clearCart: () => void;
   total: number;
   itemCount: number;
@@ -108,6 +109,27 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     );
   }, []);
 
+  const updateItemDetails = useCallback(
+    (id: string, patch: { quantity?: number; addons?: CartAddon[]; instructions?: string | undefined }) => {
+      setItems((prev) =>
+        prev.map((i) => {
+          if (i.id !== id) return i;
+          const nextQty = patch.quantity ?? i.quantity;
+          const quantity = Number.isFinite(nextQty) ? Math.max(1, Math.floor(nextQty)) : i.quantity;
+          const addons = patch.addons != null ? (Array.isArray(patch.addons) ? patch.addons : []) : i.addons;
+          const instructions = patch.instructions;
+          return {
+            ...i,
+            quantity,
+            addons,
+            instructions,
+          };
+        })
+      );
+    },
+    []
+  );
+
   const clearCart = useCallback(() => setItems([]), []);
 
   const total = items.reduce((sum, i) => {
@@ -124,6 +146,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     addItem,
     removeItem,
     updateQuantity,
+    updateItemDetails,
     clearCart,
     total,
     itemCount,

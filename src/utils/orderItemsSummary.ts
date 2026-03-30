@@ -14,7 +14,8 @@ export function parseOrderItemLines(raw: string): ParsedOrderLine[] {
   if (!s) return [];
   const out: ParsedOrderLine[] = [];
   let rest = s;
-  const itemRe = /^(.+?)\s+x(\d+)(?:\s*\[Instruction:\s*([^\]]*)\])?(?:,\s*|$)/i;
+  // Checkout formats notes as `[Notes: ...]`, but older code may use `[Instruction: ...]`.
+  const itemRe = /^(.+?)\s+x(\d+)(?:\s*\[(?:Instruction|Notes):\s*([^\]]*)\])?(?:,\s*|$)/i;
   while (rest.trim()) {
     const m = rest.match(itemRe);
     if (!m) break;

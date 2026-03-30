@@ -13,19 +13,32 @@ module.exports = {
     orientation: 'portrait',
     icon: './assets/Masterlogo-icon.png',
     userInterfaceStyle: 'light',
+
+    // ✅ ADD THIS
+    updates: {
+      url: 'https://u.expo.dev/f2eabc34-f5c5-4951-b986-f073deb5d948',
+    },
+
+    // ✅ ADD THIS
+    runtimeVersion: {
+      policy: 'appVersion',
+    },
+
     // Stripe CardField has known Android device crashes with Fabric/new architecture in some setups.
-    // Keep classic architecture for payment stability.
     newArchEnabled: false,
     jsEngine: 'hermes',
     scheme: 'mexicanoapp',
+
     splash: {
       image: './assets/Splash.png',
       resizeMode: 'contain',
       backgroundColor: '#ffffff',
     },
+
     ios: {
       supportsTablet: true,
     },
+
     android: {
       package: 'com.mexicanoapp',
       adaptiveIcon: {
@@ -34,14 +47,16 @@ module.exports = {
       },
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,
-      // Let the window resize when the keyboard opens so checkout fields stay visible above Stripe CardField.
       softwareKeyboardLayoutMode: 'resize',
     },
+
     web: {
       favicon: './assets/favicon.png',
     },
+
     extra: {
-      apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL || DEFAULT_API_BASE_URL,
+      apiBaseUrl:
+        process.env.EXPO_PUBLIC_API_BASE_URL || DEFAULT_API_BASE_URL,
       eas: {
         projectId: EAS_PROJECT_ID,
       },

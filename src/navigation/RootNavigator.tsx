@@ -25,7 +25,7 @@ export type RootStackParamList = {
   Splash: undefined;
   OnBoarding: undefined;
   Main: undefined;
-  ItemDetail: { item: ItemDetailParamItem };
+  ItemDetail: { item: ItemDetailParamItem; cartItemId?: string };
   Checkout: undefined;
   Cart: undefined;
   Address: { savedAddress?: { latitude: number; longitude: number; address: string; city?: string; state?: string; zipCode?: string; customerLocation?: string } } | undefined;

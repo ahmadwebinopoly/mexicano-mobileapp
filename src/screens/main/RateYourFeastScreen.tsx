@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { submitReview } from '../../api/review';
 import { getMenuItems, type MenuItem } from '../../api/discoverScreen';
 import { parseOrderItemLines } from '../../utils/orderItemsSummary';
@@ -122,8 +123,9 @@ export default function RateYourFeastScreen() {
   const [lineRatings, setLineRatings] = useState<number[]>([]);
   /** Per dish line: multiple tag labels can be selected */
   const [lineTags, setLineTags] = useState<string[][]>([]);
-  const [comment, setComment] = useState('');
-  const [commentInputHeight, setCommentInputHeight] = useState(92);
+  const [lineComments, setLineComments] = useState<string[]>([]);
+  const [lineCommentVisible, setLineCommentVisible] = useState<boolean[]>([]);
+  const [linePhotoDataUrls, setLinePhotoDataUrls] = useState<string[][]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [menuCatalog, setMenuCatalog] = useState<MenuItem[]>([]);
@@ -163,6 +165,9 @@ export default function RateYourFeastScreen() {
     const n = parsedLines.length;
     setLineRatings(Array.from({ length: n }, () => 0));
     setLineTags(Array.from({ length: n }, () => []));
+    setLineComments(Array.from({ length: n }, () => ''));
+    setLineCommentVisible(Array.from({ length: n }, () => false));
+    setLinePhotoDataUrls(Array.from({ length: n }, () => []));
   }, [items]);
 
   const allDishLinesRated =
@@ -226,12 +231,22 @@ export default function RateYourFeastScreen() {
       const dishRating = aggregateDishRating(lineRatings);
       const allSelectedTags = Array.from(new Set(lineTags.flat().filter(Boolean)));
       const dishTag = allSelectedTags.length > 0 ? allSelectedTags.join(', ') : undefined;
+      const commentParts = parsedLines
+        .map((line, idx) => {
+          const c = String(lineComments[idx] ?? '').trim();
+          if (!c) return null;
+          return `${baseProductNameFromOrderLine(line.title)}: ${c}`;
+        })
+        .filter(Boolean);
+      const reviewComment = commentParts.join('\n').trim() || undefined;
+      const photoUrls = linePhotoDataUrls.flat().filter(Boolean);
       const res = await submitReview({
         orderId: String(orderId),
         orderType: reviewOrderType,
         dishRating,
         dishTag,
-        comment: comment.trim() || undefined,
+        comment: reviewComment,
+        photoUrls: photoUrls.length ? photoUrls : undefined,
         experience,
       });
       setToastMessage(res.message || 'Review posted successfully.');
@@ -245,6 +260,73 @@ export default function RateYourFeastScreen() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const uriToDataUrl = async (uri: string): Promise<string> => {
+    try {
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const reader = new FileReader();
+      return await new Promise<string>((resolve, reject) => {
+        reader.onloadend = () => resolve(String(reader.result ?? uri));
+        reader.onerror = () => reject(new Error('Failed to convert image'));
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return uri;
+    }
+  };
+
+  const toggleLineCommentVisible = (idx: number) => {
+    setLineCommentVisible((prev) => {
+      const next = [...prev];
+      next[idx] = !Boolean(next[idx]);
+      return next;
+    });
+  };
+
+  const handlePickLineImage = async (idx: number) => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (perm.status !== 'granted') {
+        Alert.alert('Permission needed', 'Please allow photo access to upload images.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.7,
+        selectionLimit: 1,
+      } as any);
+
+      if (result.canceled) return;
+
+      const asset = result.assets?.[0];
+      const uri = asset?.uri;
+      if (!uri) return;
+
+      const dataUrl = await uriToDataUrl(uri);
+      setLinePhotoDataUrls((prev) => {
+        const next = [...prev];
+        const existing = next[idx] ?? [];
+        next[idx] = [...existing, dataUrl];
+        return next;
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to pick image.';
+      Alert.alert('Image error', msg);
+    }
+  };
+
+  const removeLinePhoto = (lineIdx: number, photoIdx: number) => {
+    setLinePhotoDataUrls((prev) => {
+      const next = [...prev];
+      const list = [...(next[lineIdx] ?? [])];
+      list.splice(photoIdx, 1);
+      next[lineIdx] = list;
+      return next;
+    });
   };
 
   return (
@@ -364,26 +446,69 @@ export default function RateYourFeastScreen() {
                   );
                 })}
               </View>
+
+              <View style={styles.lineOptionalArea}>
+                <Pressable
+                  onPress={() => toggleLineCommentVisible(idx)}
+                  style={({ pressed }) => [styles.lineActionBtn, pressed && { opacity: 0.9 }]}
+                >
+                  <Text style={styles.lineActionText}>Add comment</Text>
+                  <Ionicons
+                    name={lineCommentVisible[idx] ? 'chevron-up' : 'chevron-down'}
+                    size={18}
+                    color={GOLD}
+                    style={{ marginLeft: 'auto' }}
+                  />
+                </Pressable>
+
+                {lineCommentVisible[idx] ? (
+                  <TextInput
+                    value={lineComments[idx] ?? ''}
+                    onChangeText={(v) =>
+                      setLineComments((prev) => {
+                        const next = [...prev];
+                        next[idx] = v;
+                        return next;
+                      })
+                    }
+                    placeholder="Share your experience..."
+                    placeholderTextColor="rgba(255,255,255,0.45)"
+                    multiline
+                    textAlignVertical="top"
+                    style={[styles.commentInput, { height: 92 }]}
+                  />
+                ) : null}
+
+                <Pressable
+                  onPress={() => void handlePickLineImage(idx)}
+                  style={({ pressed }) => [styles.lineActionBtn, pressed && { opacity: 0.9 }]}
+                >
+                  <Ionicons name="image-outline" size={18} color={GOLD} />
+                  <Text style={styles.lineActionText}>
+                    {linePhotoDataUrls[idx]?.length ? 'Add another image' : 'Add image'}
+                  </Text>
+                </Pressable>
+
+                {linePhotoDataUrls[idx]?.length ? (
+                  <View style={styles.photoGrid}>
+                    {linePhotoDataUrls[idx].map((p, pIdx) => (
+                      <View key={`photo-${idx}-${pIdx}`} style={styles.photoThumbWrap}>
+                        <Image source={{ uri: p }} style={styles.photoThumb} />
+                        <Pressable
+                          hitSlop={8}
+                          onPress={() => removeLinePhoto(idx, pIdx)}
+                          style={styles.photoRemoveBtn}
+                        >
+                          <Ionicons name="close" size={16} color={BG} />
+                        </Pressable>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
             </View>
           );
         })}
-
-        <View style={styles.commentWrap}>
-          <Text style={styles.commentLabel}>Comment (optional)</Text>
-          <TextInput
-            value={comment}
-            onChangeText={setComment}
-            placeholder="Share your experience..."
-            placeholderTextColor="rgba(255,255,255,0.45)"
-            multiline
-            textAlignVertical="top"
-            style={[styles.commentInput, { height: commentInputHeight }]}
-            onContentSizeChange={(e) => {
-              const next = Math.max(92, Math.min(180, Math.ceil(e.nativeEvent.contentSize.height) + 20));
-              setCommentInputHeight(next);
-            }}
-          />
-        </View>
 
         <Pressable
           style={[styles.submitBtn, (!canSubmit || submitting) && styles.submitBtnDisabled]}
@@ -578,6 +703,56 @@ const styles = StyleSheet.create({
     color: TEXT,
     fontSize: 14,
     lineHeight: 20,
+  },
+  lineOptionalArea: {
+    marginTop: 10,
+  },
+  lineActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(254,203,77,0.25)',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 10,
+  },
+  lineActionText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: GOLD,
+  },
+  photoGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 2,
+  },
+  photoThumb: {
+    width: 68,
+    height: 68,
+    borderRadius: 14,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  photoThumbWrap: {
+    position: 'relative',
+  },
+  photoRemoveBtn: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: GOLD,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   submitBtn: {
     marginTop: 4,

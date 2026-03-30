@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, FlatList, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
@@ -7,13 +7,14 @@ import { navigateToLoginRegister } from '../../navigation/rootNavigationRef';
 import { getToken } from '../../storagetank';
 import { getWishlist, removeFromWishlist } from '../../api/wishlist';
 import { WishlistScreenSkeleton } from '../../components/skeleton';
+import { getProductReviewsSummary } from '../../api/review';
 
 const BG_DARK = '#0B1D1B';
 const CARD_BG = '#152C29';
 const GOLD = '#FECB4D';
 const TEXT_WHITE = '#FFFFFF';
 const MUTED_TEXT = 'rgba(255,255,255,0.7)';
-const HORIZONTAL_PADDING = 20;
+const HORIZONTAL_PADDING = 16;
 
 type WishlistProductLike = {
   productId?: number;
@@ -62,12 +63,41 @@ function formatPrice(price: string): string {
   return p.startsWith('$') ? p : `$${p}`;
 }
 
+function parseOptionalNumber(value: unknown): number | null {
+  if (value == null) return null;
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function formatReviewCountCompact(count: number): string {
+  return String(Math.max(0, Math.round(count)));
+}
+
+function clampRating0to5(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(5, n));
+}
+
+function getStarIconNames(avg: number): Array<React.ComponentProps<typeof MaterialIcons>['name']> {
+  const a = clampRating0to5(avg);
+  const rounded = Math.round(a * 2) / 2;
+  const full = Math.floor(rounded);
+  const half = rounded - full >= 0.5 ? 1 : 0;
+  const empty = Math.max(0, 5 - full - half);
+  return [
+    ...Array.from({ length: full }, () => 'star' as const),
+    ...Array.from({ length: half }, () => 'star-half' as const),
+    ...Array.from({ length: empty }, () => 'star-border' as const),
+  ];
+}
+
 export default function WishlistScreen() {
   const navigation = useNavigation<any>();
   const [wishlistItems, setWishlistItems] = useState<WishlistProductLike[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
+  const [ratingById, setRatingById] = useState<Record<string, { avg: number; count: number }>>({});
 
   const loadWishlist = useCallback(async () => {
     try {
@@ -107,6 +137,33 @@ export default function WishlistScreen() {
     [wishlistItems]
   );
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const ids = normalized.map((p) => String(p.id).trim()).filter(Boolean);
+        if (ids.length === 0) {
+          if (!cancelled) setRatingById({});
+          return;
+        }
+        const summary = await getProductReviewsSummary(ids);
+        if (cancelled) return;
+        const next: Record<string, { avg: number; count: number }> = {};
+        Object.entries(summary.items || {}).forEach(([id, row]) => {
+          const count = parseOptionalNumber((row as { count?: unknown }).count) ?? 0;
+          const avg = parseOptionalNumber((row as { averageOverall?: unknown }).averageOverall) ?? 0;
+          if (count > 0 && avg > 0) next[String(id).trim()] = { avg, count };
+        });
+        setRatingById(next);
+      } catch {
+        if (!cancelled) setRatingById({});
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [normalized]);
+
   const handleRemove = useCallback(
     async (productIdStr: string) => {
       try {
@@ -131,40 +188,63 @@ export default function WishlistScreen() {
 
   const renderItem = ({ item }: { item: ReturnType<typeof normalizeWishlistProduct> }) => {
     const isRemoving = removingIds.has(item.id);
+    const stat = ratingById[String(item.id).trim()];
+    const ratingText =
+      stat && stat.avg > 0 ? `${stat.avg.toFixed(1)} (${formatReviewCountCompact(stat.count)})` : '';
     return (
       <Pressable
-        style={styles.wishlistCard}
+        style={styles.productGridCard}
         disabled={isRemoving}
         onPress={() => {}}
       >
-        <View style={styles.wishlistCardTopRow}>
-          <View style={styles.imageCircle}>
-            {item.image ? (
-              <Image
-                source={item.image}
-                style={{ width: '100%', height: '100%' }}
-                resizeMode="cover"
-              />
-            ) : (
-              <Ionicons name="image-outline" size={18} color="rgba(255,255,255,0.35)" />
-            )}
-          </View>
+        <View style={styles.productGridTopRow}>
+          {stat && stat.avg > 0 ? (
+            <View style={styles.productGridTopLeftRow}>
+              <View style={styles.productGridStarsRow}>
+                {getStarIconNames(stat.avg).map((name, i) => (
+                  <MaterialIcons key={`${item.id}-star-${i}-${name}`} name={name} size={16} color={GOLD} />
+                ))}
+              </View>
+              {ratingText ? (
+                <Text style={styles.productGridRating} numberOfLines={1}>
+                  {ratingText}
+                </Text>
+              ) : null}
+            </View>
+          ) : (
+            <View />
+          )}
+        </View>
+
+        <View style={styles.productGridImageCircle}>
+          {item.image ? (
+            <Image source={item.image} style={styles.productGridImageCircleImg} resizeMode="cover" />
+          ) : (
+            <View style={styles.productGridImageCircleSkeleton}>
+              <MaterialIcons name="image-not-supported" size={22} color="rgba(255,255,255,0.35)" />
+            </View>
+          )}
+        </View>
+
+        <Text style={styles.productGridName} numberOfLines={1}>
+          {item.name}
+        </Text>
+
+        <View style={styles.productGridBottomRow}>
+          <Text style={styles.productGridPrice}>{formatPrice(item.price)}</Text>
           <Pressable
-            style={styles.removeHeartBtn}
-            hitSlop={6}
+            style={styles.productGridHeartBtn}
+            hitSlop={8}
+            disabled={isRemoving}
             onPress={(e) => {
               e.stopPropagation?.();
               void handleRemove(item.id);
             }}
+            accessibilityLabel="Remove from wishlist"
           >
             <MaterialIcons name="favorite" size={16} color={BG_DARK} />
           </Pressable>
         </View>
-
-        <Text style={styles.wishlistName} numberOfLines={1}>
-          {item.name}
-        </Text>
-        <Text style={styles.wishlistPrice}>{formatPrice(item.price)}</Text>
       </Pressable>
     );
   };
@@ -262,55 +342,101 @@ const styles = StyleSheet.create({
   },
   gridColumnWrapper: {
     justifyContent: 'space-between',
-    gap: 12,
+    gap: 0,
   },
   gridContent: {
     paddingBottom: 24,
   },
-  wishlistCard: {
+  productGridCard: {
     width: '48%',
     backgroundColor: CARD_BG,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(229,185,72,0.25)',
-    padding: 12,
+    borderColor: 'rgba(229,185,72,0.3)',
+    paddingTop: 12,
+    paddingBottom: 14,
+    paddingHorizontal: 12,
     marginBottom: 12,
+    height: 248,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
   },
-  wishlistCardTopRow: {
+  productGridTopRow: {
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
   },
-  imageCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    borderWidth: 1,
-    borderColor: 'rgba(229,185,72,0.25)',
+  productGridTopLeftRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  productGridStarsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 1,
+  },
+  productGridRating: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: TEXT_WHITE,
+    opacity: 0.85,
+  },
+  productGridImageCircle: {
+    width: 126,
+    height: 126,
+    borderRadius: 63,
     backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.20)',
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 8,
+    marginBottom: 10,
     overflow: 'hidden',
   },
-  removeHeartBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+  productGridImageCircleImg: {
+    width: '100%',
+    height: '100%',
+  },
+  productGridImageCircleSkeleton: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  productGridName: {
+    width: '100%',
+    textAlign: 'left',
+    fontFamily: 'Montserrat_700Bold',
+    fontSize: 15,
+    fontWeight: '700',
+    color: TEXT_WHITE,
+    marginBottom: 6,
+  },
+  productGridBottomRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 2,
+  },
+  productGridPrice: {
+    fontFamily: 'Montserrat_700Bold',
+    fontSize: 15,
+    fontWeight: '700',
+    color: GOLD,
+    lineHeight: 18,
+  },
+  productGridHeartBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: GOLD,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  wishlistName: {
-    color: TEXT_WHITE,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  wishlistPrice: {
-    marginTop: 4,
-    color: GOLD,
-    fontSize: 14,
-    fontWeight: '800',
   },
 });
 

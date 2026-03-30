@@ -6,9 +6,11 @@ import {
   Pressable,
   Image,
   ScrollView,
+  KeyboardAvoidingView,
   Modal,
   ActivityIndicator,
   TextInput,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
@@ -128,13 +130,16 @@ function normalizeAddonFromItem(raw: ItemDetailAddonRaw): AddonItem {
   return { ...raw, id, name, price, image } as AddonItem;
 }
 
-type ItemDetailRoute = RouteProp<{ ItemDetail: { item: ItemDetailParamItem } }, 'ItemDetail'>;
+type ItemDetailRoute = RouteProp<RootStackParamList, 'ItemDetail'>;
 
 export default function ItemDetailScreen() {
   const navigation = useNavigation<ItemDetailNavigationProp>();
   const route = useRoute<ItemDetailRoute>();
-  const { addItem } = useCart();
+  const { addItem, items: cartItems, updateItemDetails } = useCart();
   const item = route.params?.item;
+  const editingCartItemId = route.params?.cartItemId;
+  const editingCartItem = editingCartItemId ? cartItems.find((c) => c.id === editingCartItemId) : undefined;
+  const isEditingCartItem = Boolean(editingCartItemId && editingCartItem);
   const addons: AddonItem[] = (item?.addons ?? []).map(normalizeAddonFromItem);
   const addonGridRows = useMemo(() => {
     const rows: { left?: AddonItem; right?: AddonItem }[] = [];
@@ -145,10 +150,23 @@ export default function ItemDetailScreen() {
   }, [addons]);
   const [selectedAddonIds, setSelectedAddonIds] = useState<Set<string>>(new Set());
   const [specialInstructions, setSpecialInstructions] = useState('');
+  const [quantity, setQuantity] = useState(1);
   const [instructionsInputHeight, setInstructionsInputHeight] = useState(44);
   const [addingToCart, setAddingToCart] = useState(false);
-  const [itemAdded, setItemAdded] = useState(false);
   const [showSkeleton, setShowSkeleton] = useState(true);
+
+  useEffect(() => {
+    if (!isEditingCartItem || !editingCartItem) return;
+    setSpecialInstructions(String(editingCartItem.instructions ?? ''));
+    setQuantity(Math.max(1, Math.floor(editingCartItem.quantity || 1)));
+    const next = new Set<string>();
+    (editingCartItem.addons || []).forEach((a) => {
+      if (a?.id != null) next.add(String(a.id));
+    });
+    setSelectedAddonIds(next);
+    // Only run when the cart item id changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingCartItemId]);
 
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [defaultAddress, setDefaultAddress] = useState<Address | null>(null);
@@ -271,18 +289,57 @@ export default function ItemDetailScreen() {
       else next.add(id);
       return next;
     });
-    setItemAdded(false);
   };
 
-  useEffect(() => {
-    setItemAdded(false);
-  }, [item?.id]);
+  const getAddonsSignature = (addonsList: Array<{ id?: string; name?: string; price?: string }>): string => {
+    return addonsList
+      .map((a) => ({
+        id: String(a.id ?? '').trim(),
+        name: String(a.name ?? '').trim(),
+        price: String(a.price ?? '').trim(),
+      }))
+      .sort((a, b) => {
+        if (a.id !== b.id) return a.id.localeCompare(b.id);
+        if (a.name !== b.name) return a.name.localeCompare(b.name);
+        return a.price.localeCompare(b.price);
+      })
+      .map((a) => `${a.id}|${a.name}|${a.price}`)
+      .join('||');
+  };
+
+  const selectedAddonsList = useMemo(() => {
+    return addons
+      .filter((a) => selectedAddonIds.has(a.id))
+      .map((a) => ({
+        id: a.id,
+        name: String(a.name ?? '').trim() || a.id,
+        price: String(a.price ?? ''),
+        image: a.image ?? null,
+      }));
+  }, [addons, selectedAddonIds]);
+
+  const selectedInstructionsTrim = String(specialInstructions ?? '').trim();
+  const selectedAddonsSig = useMemo(() => getAddonsSignature(selectedAddonsList), [selectedAddonsList]);
+
+  const isAlreadyInCart = useMemo(() => {
+    if (isEditingCartItem) return false;
+    const productId = item?.id != null ? String(item.id) : '';
+    if (!productId) return false;
+
+    return cartItems.some((ci) => {
+      if (String(ci.productId) !== productId) return false;
+      const sig = getAddonsSignature(ci.addons as Array<{ id?: string; name?: string; price?: string }>);
+      if (sig !== selectedAddonsSig) return false;
+      const prevInstr = String(ci.instructions ?? '').trim();
+      return prevInstr === selectedInstructionsTrim;
+    });
+  }, [cartItems, isEditingCartItem, item?.id, selectedAddonsSig, selectedInstructionsTrim]);
 
   const mainPrice = item?.price ? parseFloat(String(item.price).replace(/[$,]/g, '')) || 0 : 0;
   const addonsTotal = addons
     .filter((a) => selectedAddonIds.has(a.id))
     .reduce((sum, a) => sum + (parseFloat(String(a.price).replace(/[$,]/g, '')) || 0), 0);
-  const total = mainPrice + addonsTotal;
+  const total = (mainPrice + addonsTotal) * Math.max(1, quantity);
 
   if (!item) {
     return (
@@ -319,11 +376,16 @@ export default function ItemDetailScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
         {/* Hero image container – contained with padding and radius */}
         <View style={styles.imageContainer}>
           <View style={styles.imageWrap}>
@@ -398,12 +460,11 @@ export default function ItemDetailScreen() {
         ) : null}
 
         <View style={styles.instructionsSection}>
-          <Text style={styles.instructionsTitle}>Notes</Text>
+          <Text style={styles.instructionsTitle}>Add Notes</Text>
           <TextInput
             value={specialInstructions}
             onChangeText={(v) => {
               setSpecialInstructions(v);
-              setItemAdded(false);
             }}
             placeholder="Add Notes"
             placeholderTextColor="rgba(255,255,255,0.45)"
@@ -498,7 +559,8 @@ export default function ItemDetailScreen() {
         </View>
 
         <View style={styles.bottomSpacer} />
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Choose delivery address modal */}
       <Modal
@@ -562,19 +624,49 @@ export default function ItemDetailScreen() {
         <View style={styles.totalWrap}>
           <Text style={styles.totalPrice}>{formatPrice(String(total.toFixed(2)))}</Text>
         </View>
+        <View style={styles.qtyStepper}>
+          <Pressable
+            style={styles.qtyBtn}
+            onPress={() => setQuantity((q) => Math.max(1, q - 1))}
+            hitSlop={8}
+            accessibilityLabel="Decrease quantity"
+          >
+            <Text style={styles.qtyBtnText}>−</Text>
+          </Pressable>
+          <View style={styles.qtyBadge}>
+            <Text style={styles.qtyBadgeText}>{quantity}</Text>
+          </View>
+          <Pressable
+            style={styles.qtyBtn}
+            onPress={() => setQuantity((q) => Math.min(99, q + 1))}
+            hitSlop={8}
+            accessibilityLabel="Increase quantity"
+          >
+            <Text style={styles.qtyBtnText}>+</Text>
+          </Pressable>
+        </View>
         <Pressable
           style={[styles.addToCartBtn, addingToCart && styles.addToCartBtnDisabled]}
           onPress={async () => {
             if (!item || addingToCart) return;
+            if (isEditingCartItem && editingCartItemId) {
+              setAddingToCart(true);
+              updateItemDetails(editingCartItemId, {
+                quantity,
+                addons: selectedAddonsList,
+                instructions: specialInstructions.trim() || undefined,
+              });
+              await new Promise((r) => setTimeout(r, 200));
+              setAddingToCart(false);
+              navigation.navigate('Cart');
+              return;
+            }
+            if (isAlreadyInCart) {
+              navigation.navigate('Cart');
+              return;
+            }
+
             setAddingToCart(true);
-            const selectedAddonsList = addons
-              .filter((a) => selectedAddonIds.has(a.id))
-              .map((a) => ({
-                id: a.id,
-                name: String(a.name ?? '').trim() || a.id,
-                price: String(a.price ?? ''),
-                image: a.image ?? null,
-              }));
             addItem({
               productId: item.id,
               name: item.name,
@@ -582,17 +674,24 @@ export default function ItemDetailScreen() {
               image: item.image,
               addons: selectedAddonsList,
               instructions: specialInstructions.trim() || undefined,
-              quantity: 1,
+              quantity,
             });
             await new Promise((r) => setTimeout(r, 500));
             setAddingToCart(false);
-            setItemAdded(true);
             navigation.navigate('Cart');
           }}
           disabled={addingToCart}
         >
           <Text style={styles.addToCartBtnText}>
-            {addingToCart ? 'Adding…' : itemAdded ? 'Added' : 'Add To Cart'}
+            {addingToCart
+              ? isEditingCartItem
+                ? 'Updating…'
+                : 'Adding…'
+              : isEditingCartItem
+                ? 'Update Cart'
+                : isAlreadyInCart
+                  ? 'Already in cart'
+                  : 'Add To Cart'}
           </Text>
         </Pressable>
       </View>
@@ -989,6 +1088,7 @@ const styles = StyleSheet.create({
     backgroundColor: BG_DARK,
     borderTopWidth: 1,
     borderTopColor: 'rgba(229,185,72,0.2)',
+    gap: 10,
   },
   totalWrap: {
     flex: 1,
@@ -1013,5 +1113,41 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: BG_DARK,
+  },
+  qtyStepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  qtyBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: GOLD,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  qtyBtnText: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: BG_DARK,
+    includeFontPadding: false,
+  },
+  qtyBadge: {
+    minWidth: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: CARD_BG,
+    borderWidth: 1,
+    borderColor: 'rgba(254,203,77,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  qtyBadgeText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: TEXT_WHITE,
+    includeFontPadding: false,
   },
 });

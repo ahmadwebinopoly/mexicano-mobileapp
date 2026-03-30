@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
+  ActivityIndicator,
   Linking,
   Dimensions,
   Image,
@@ -721,12 +722,16 @@ export default function ViewOrderDetailsScreen() {
                 <View style={styles.summaryLineBody}>
                   <View style={styles.summaryLineTopRow}>
                     <View style={styles.summaryLineTitleBlock}>
-                      <Text style={styles.summaryLineTitle} numberOfLines={3}>
-                        {line.title}
-                        <Text style={styles.summaryQtyText}>
-                          {' '}
-                          ×{line.quantity}
-                        </Text>
+                      <Text style={styles.summaryLineTitle} numberOfLines={2}>
+                        {baseProductNameFromOrderLine(line.title)}
+                      </Text>
+                      <Text style={styles.summaryQtyAddonsText} numberOfLines={2}>
+                        <Text style={styles.summaryQtyText}>x{line.quantity}</Text>
+                        {(() => {
+                          const addonNames = extractAddonNamesFromOrderTitle(String(line.title));
+                          if (addonNames.length === 0) return null;
+                          return ` • ${addonNames.join(', ')}`;
+                        })()}
                       </Text>
                     </View>
                     <Text style={styles.summaryLinePrice}>
@@ -735,7 +740,7 @@ export default function ViewOrderDetailsScreen() {
                   </View>
                   {line.instruction ? (
                     <Text style={styles.summaryInstructionLine} numberOfLines={5}>
-                      <Text style={styles.summaryInstructionLabel}>Instruction: </Text>
+                      <Text style={styles.summaryInstructionLabel}>Notes: </Text>
                       <Text style={styles.summaryInstructionValue}>{line.instruction}</Text>
                     </Text>
                   ) : null}
@@ -776,23 +781,35 @@ export default function ViewOrderDetailsScreen() {
           </View>
           <StatusProgressLine steps={progressSteps} activeIndex={progressActiveIndex} />
         </View>
-        {delivered && !reviewAlreadyExists && !checkingExistingReview ? (
+        {delivered ? (
           <View style={styles.addReviewWrap}>
-            <Pressable
-              style={styles.addReviewBtn}
-              onPress={() =>
-                navigation.navigate('RateYourFeast', {
-                  orderId: String(order.id),
-                  items: order.items || '',
-                  amount: order.amount || '',
-                  orderType: order.type || '',
-                })
-              }
-              accessibilityRole="button"
-              accessibilityLabel="Add a review"
-            >
-              <Text style={styles.addReviewBtnText}>Rate Your Feast ★</Text>
-            </Pressable>
+            {checkingExistingReview ? (
+              <View style={styles.addReviewInfoPill}>
+                <ActivityIndicator size="small" color={GOLD} />
+                <Text style={styles.addReviewInfoText}>Checking review status…</Text>
+              </View>
+            ) : reviewAlreadyExists ? (
+              <View style={styles.addReviewInfoPill}>
+                <Ionicons name="checkmark-circle-outline" size={16} color={GOLD} />
+                <Text style={styles.addReviewInfoText}>Review against this order already submitted</Text>
+              </View>
+            ) : (
+              <Pressable
+                style={styles.addReviewBtn}
+                onPress={() =>
+                  navigation.navigate('RateYourFeast', {
+                    orderId: String(order.id),
+                    items: order.items || '',
+                    amount: order.amount || '',
+                    orderType: order.type || '',
+                  })
+                }
+                accessibilityRole="button"
+                accessibilityLabel="Add a review"
+              >
+                <Text style={styles.addReviewBtnText}>Rate Your Feast ★</Text>
+              </Pressable>
+            )}
           </View>
         ) : null}
 
@@ -922,15 +939,15 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   orderHeroId: {
-    fontSize: 30,
-    lineHeight: 34,
+    fontSize: 22,
+    lineHeight: 28,
     fontWeight: '900',
     color: GOLD,
-    letterSpacing: 0.4,
+    letterSpacing: 0.3,
     textTransform: 'uppercase',
   },
   orderHeroDate: {
-    marginTop: 10,
+    marginTop: 0,
     fontSize: 15,
     lineHeight: 22,
     color: TEXT_WHITE,
@@ -1014,6 +1031,27 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: BG_DARK,
     letterSpacing: 0.2,
+  },
+  addReviewInfoPill: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(254,203,77,0.10)',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(254,203,77,0.22)',
+  },
+  addReviewInfoText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: TEXT_WHITE,
+    opacity: 0.92,
+    textAlign: 'center',
+    flexShrink: 1,
   },
   addressBlockText: {
     fontSize: 14,
@@ -1124,6 +1162,12 @@ const styles = StyleSheet.create({
   summaryQtyText: {
     fontWeight: '800',
     color: GOLD,
+  },
+  summaryQtyAddonsText: {
+    marginTop: 6,
+    fontSize: 12,
+    lineHeight: 18,
+    color: 'rgba(255,255,255,0.8)',
   },
   summaryLinePrice: {
     fontSize: 14,

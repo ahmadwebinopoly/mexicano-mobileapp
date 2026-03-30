@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import {
   getAllAddresses,
@@ -37,6 +37,7 @@ const HORIZONTAL_PADDING = 20;
 
 export default function AddressScreen() {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -45,6 +46,7 @@ export default function AddressScreen() {
     fullAddress?: string;
     city?: string;
     state?: string;
+    zipCode?: string;
   }>({});
   const [editErrors, setEditErrors] = useState<{
     fullAddress?: string;
@@ -191,7 +193,7 @@ export default function AddressScreen() {
   };
 
   // Add Modal Functions
-  const openAddModal = () => {
+  const openAddModal = useCallback(() => {
     setAddAddress('');
     setAddCity('');
     setAddState('');
@@ -204,11 +206,22 @@ export default function AddressScreen() {
     setFetchedAddressText('');
     setAddErrors({});
     setAddModalVisible(true);
-  };
+  }, []);
 
   const closeAddModal = () => {
     setAddModalVisible(false);
   };
+
+  // If navigated from Checkout delivery picker:
+  // `navigation.navigate('Address', { openAddModal: true })`
+  useEffect(() => {
+    const shouldOpen = route?.params?.openAddModal === true;
+    if (!shouldOpen) return;
+    if (addModalVisible) return;
+
+    openAddModal();
+    navigation.setParams?.({ openAddModal: false });
+  }, [route?.params?.openAddModal, addModalVisible, openAddModal, navigation]);
 
   const fetchLocation = async () => {
     try {
@@ -246,7 +259,10 @@ export default function AddressScreen() {
         if (resolvedAddress) setAddAddress(resolvedAddress);
         if (place.city) setAddCity(place.city);
         if (place.region) setAddState(place.region);
-        if (place.postalCode) setAddZipCode(place.postalCode);
+        if (place.postalCode) {
+          setAddZipCode(place.postalCode);
+          setAddErrors((prev) => ({ ...prev, zipCode: undefined }));
+        }
       }
     } catch (e) {
       Alert.alert('Error', 'Failed to fetch location. Please try again.');
@@ -261,6 +277,7 @@ export default function AddressScreen() {
       fullAddress?: string;
       city?: string;
       state?: string;
+      zipCode?: string;
     } = {};
 
     if (addLatitude == null || addLongitude == null) {
@@ -274,6 +291,11 @@ export default function AddressScreen() {
     }
     if (!addState.trim()) {
       nextErrors.state = 'State is required.';
+    }
+
+    // ZIP code should be resolved by GPS; if it wasn't fetched, ask user to enter manually.
+    if (!addZipCode.trim()) {
+      nextErrors.zipCode = 'zipCode is not fetched by GPS, please enter manually,';
     }
 
     if (Object.values(nextErrors).some(Boolean)) {
@@ -299,10 +321,16 @@ export default function AddressScreen() {
         zipCode: addZipCode.trim() || undefined,
         floor: addFloor.trim() || undefined,
         homeNo: addHomeNo.trim() || undefined,
-        isDefault: addresses.length === 0,
+        // When user adds a new address from checkout, make it the default automatically.
+        isDefault: true,
       });
       closeAddModal();
       await fetchAddresses();
+
+      // If opened from checkout delivery picker, return back to checkout automatically.
+      if (route?.params?.returnToCheckout) {
+        navigation.goBack();
+      }
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save address.');
     } finally {
@@ -605,11 +633,15 @@ export default function AddressScreen() {
               <TextInput
                 style={styles.input}
                 value={addZipCode}
-                onChangeText={setAddZipCode}
+                onChangeText={(v) => {
+                  setAddZipCode(v);
+                  setAddErrors((prev) => ({ ...prev, zipCode: undefined }));
+                }}
                 placeholder="Zip Code"
                 placeholderTextColor={MUTED_TEXT}
                 keyboardType="numeric"
               />
+              {addErrors.zipCode ? <Text style={styles.fieldErrorText}>{addErrors.zipCode}</Text> : null}
 
               {/* Floor */}
               <Text style={styles.inputLabel}>Floor</Text>
