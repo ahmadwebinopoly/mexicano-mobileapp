@@ -49,11 +49,6 @@ module.exports = {
       predictiveBackGestureEnabled: false,
       softwareKeyboardLayoutMode: 'resize',
     },
-
-    web: {
-      favicon: './assets/favicon.png',
-    },
-
     extra: {
       apiBaseUrl:
         process.env.EXPO_PUBLIC_API_BASE_URL || DEFAULT_API_BASE_URL,
