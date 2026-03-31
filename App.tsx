@@ -7,23 +7,36 @@ import { useFonts } from '@expo-google-fonts/montserrat';
 import { Montserrat_600SemiBold, Montserrat_700Bold } from '@expo-google-fonts/montserrat';
 import RootNavigator from './src/navigation/RootNavigator';
 import * as Notifications from 'expo-notifications';
-import { getToken } from './src/storagetank';
 import { registerForPushNotifications } from './src/services/pushNotifications';
+import { navigateToOrderFromPush } from './src/navigation/rootNavigationRef';
 
 export default function App() {
   useEffect(() => {
     const initPush = async () => {
-      const token = await getToken();
-      if (token) {
-        void registerForPushNotifications();
-      }
+      // Register token even before login; API will include auth header if available.
+      void registerForPushNotifications();
     };
     void initPush();
   }, []);
 
   useEffect(() => {
-    const subscription = Notifications.addNotificationResponseReceivedListener(() => {
-      // User tapped notification – app opens
+    const handleResponse = (response: Notifications.NotificationResponse) => {
+      const data = (response as any)?.notification?.request?.content?.data ?? {};
+      const type = String((data as any)?.type ?? '');
+      if (type !== 'order_status') return;
+      const rawOrderId = String((data as any)?.orderId ?? '').trim();
+      const parsedOrderId = rawOrderId.replace(/[^\d]/g, '') || rawOrderId.replace(/^#/, '');
+      if (!parsedOrderId) return;
+      navigateToOrderFromPush(parsedOrderId);
+    };
+
+    // Cold start: app opened by tapping a notification
+    void Notifications.getLastNotificationResponseAsync().then((resp) => {
+      if (resp) handleResponse(resp);
+    });
+
+    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+      handleResponse(response);
     });
     return () => subscription.remove();
   }, []);

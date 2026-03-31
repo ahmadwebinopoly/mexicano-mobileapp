@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Modal, Pressable } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useNavigation } from '@react-navigation/native';
@@ -9,10 +9,11 @@ import MenuScreen from '../screens/main/MenuScreen';
 import ContactScreen from '../screens/extra/ContactScreen';
 import StoryScreen from '../screens/extra/StoryScreen';
 import ProfileScreen from '../screens/main/ProfileScreen';
-import { startOrdersPolling, stopOrdersPolling, type Order } from '../api/myorder';
+import { getMyOrders, type Order } from '../api/myorder';
 import { parseOrderItemLines } from '../api/discoverScreen';
 import { getToken } from '../storagetank';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Notifications from 'expo-notifications';
 
 const Tab = createBottomTabNavigator();
 
@@ -473,48 +474,45 @@ export default function MainTabNavigator() {
     };
   }, []);
 
+  const refreshTrackableOrdersOnce = useCallback(async () => {
+    const token = await getToken();
+    if (!token) {
+      setIsAuthenticated(false);
+      setActiveOrders([]);
+      setTrackingOpen(false);
+      return;
+    }
+    setIsAuthenticated(true);
+    const data = await getMyOrders();
+    const current = Array.isArray(data.current) ? data.current : [];
+    const history = Array.isArray(data.history) ? data.history : [];
+    const trackableCurrent = current.filter((o) => isTrackableStatus(o.status));
+    const trackableCancelledHistory = history.filter((o) => normalizeStatus(o.status).includes('cancel'));
+    const trackable = [...trackableCurrent, ...trackableCancelledHistory];
+    const sorted = [...trackable].sort((a, b) => {
+      const ta = new Date(a.date || a.createdAt).getTime();
+      const tb = new Date(b.date || b.createdAt).getTime();
+      return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+    });
+    setActiveOrders(sorted);
+  }, []);
+
   useEffect(() => {
-    startOrdersPolling(
-      (data) => {
-        void (async () => {
-          const token = await getToken();
-          if (!token) {
-            setIsAuthenticated(false);
-            setActiveOrders([]);
-            setTrackingOpen(false);
-            return;
-          }
-          setIsAuthenticated(true);
+    void refreshTrackableOrdersOnce().catch(() => {
+      setIsAuthenticated(false);
+      setActiveOrders([]);
+      setTrackingOpen(false);
+    });
+  }, []);
 
-          const current = Array.isArray(data.current) ? data.current : [];
-          const history = Array.isArray(data.history) ? data.history : [];
-
-          // Some backends move cancelled orders to `history`. Include cancelled orders from both lists
-          // so the tracker can turn red even after cancellation.
-          const trackableCurrent = current.filter((o) => isTrackableStatus(o.status));
-          const trackableCancelledHistory = history.filter((o) => normalizeStatus(o.status).includes('cancel'));
-
-          const trackable = [...trackableCurrent, ...trackableCancelledHistory];
-
-          const sorted = [...trackable].sort((a, b) => {
-            const ta = new Date(a.date || a.createdAt).getTime();
-            const tb = new Date(b.date || b.createdAt).getTime();
-            return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
-          });
-          setActiveOrders(sorted);
-        })();
-      },
-      () => {
-        setIsAuthenticated(false);
-        setActiveOrders([]);
-        setTrackingOpen(false);
-      },
-      2000
-    );
-
-    return () => {
-      stopOrdersPolling();
-    };
+  // Push-driven refresh for the tracker pill (no 2s polling)
+  useEffect(() => {
+    const sub = Notifications.addNotificationReceivedListener((notification) => {
+      const data = (notification as any)?.request?.content?.data ?? {};
+      if (String((data as any)?.type ?? '') !== 'order_status') return;
+      void refreshTrackableOrdersOnce().catch(() => {});
+    });
+    return () => sub.remove();
   }, []);
 
   const trackerBottom = useMemo(() => 82, []);
@@ -620,7 +618,7 @@ export default function MainTabNavigator() {
         <Tab.Screen name="Discover" component={DiscoverScreen} />
         <Tab.Screen name="Menu" component={MenuScreen} />
         <Tab.Screen name="Story" component={StoryScreen} />
-        <Tab.Screen name="Contact" component={ContactScreen} />
+        <Tab.Screen name="Contact" component={ContactScreen} options={{ tabBarLabel: 'Contact Us' }} />
         <Tab.Screen name="Profile" component={ProfileScreen} />
       </Tab.Navigator>
 

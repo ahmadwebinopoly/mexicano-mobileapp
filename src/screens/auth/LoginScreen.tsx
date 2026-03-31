@@ -11,11 +11,13 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import type { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { login as loginApi } from '../../api/auth';
 import { getCurrentUser } from '../../api/profile';
 import { registerForPushNotifications } from '../../services/pushNotifications';
+import type { RootStackParamList } from '../../navigation/RootNavigator';
 
 const BG_DARK = '#0B1D1B';
 const CARD_BG = '#152C29';
@@ -30,6 +32,8 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
+  const route = useRoute<RouteProp<RootStackParamList, 'Login'>>();
+  const returnTo = route.params?.returnTo;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
@@ -45,7 +49,15 @@ export default function LoginScreen() {
       await loginApi({ email: e, password: p });
       await getCurrentUser();
       void registerForPushNotifications();
-      navigation.getParent()?.goBack();
+      if (returnTo === 'Checkout') {
+        navigation.reset({
+          index: 1,
+          routes: [{ name: 'Main' }, { name: 'Checkout' }],
+        });
+        return;
+      }
+      if (navigation.canGoBack?.()) navigation.goBack();
+      else navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
     } catch {
       /* toast handled elsewhere if needed */
     } finally {
@@ -62,7 +74,10 @@ export default function LoginScreen() {
         <View style={styles.header}>
           <Pressable
             style={styles.backButton}
-            onPress={() => navigation.getParent()?.goBack()}
+            onPress={() => {
+              if (navigation.canGoBack?.()) navigation.goBack();
+              else navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
+            }}
             hitSlop={8}
             accessibilityLabel="Go back"
           >
@@ -114,6 +129,15 @@ export default function LoginScreen() {
                 />
               </Pressable>
             </View>
+            <Pressable
+              style={styles.forgotRow}
+              onPress={() => navigation.navigate('ForgotPassword')}
+              disabled={submitting}
+              accessibilityRole="button"
+              accessibilityLabel="Forgot password"
+            >
+              <Text style={styles.forgotText}>Forgot password?</Text>
+            </Pressable>
           </View>
           <Pressable
             style={[styles.primaryButton, submitting && styles.primaryButtonDisabled]}
@@ -127,8 +151,17 @@ export default function LoginScreen() {
             )}
           </Pressable>
 
-          <Pressable style={styles.linkRow} onPress={() => navigation.navigate('Register')}>
-            <Text style={styles.linkText}>Create an account</Text>
+          <Pressable
+            style={styles.linkRow}
+            onPress={() => navigation.navigate('Register', returnTo ? { returnTo } : undefined)}
+            hitSlop={8}
+            accessibilityRole="link"
+            accessibilityLabel="Don't have an account? Create an account"
+          >
+            <Text style={styles.createAccountLine}>
+              <Text style={styles.createAccountPrefix}>Don&apos;t have an account? </Text>
+              <Text style={styles.createAccountEmphasis}>Create an account</Text>
+            </Text>
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -201,6 +234,15 @@ const styles = StyleSheet.create({
     paddingRight: 4,
     minHeight: 48,
   },
+  forgotRow: {
+    marginTop: 10,
+    alignSelf: 'flex-end',
+  },
+  forgotText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: GOLD,
+  },
   passwordInput: {
     flex: 1,
     paddingHorizontal: 16,
@@ -233,9 +275,18 @@ const styles = StyleSheet.create({
     marginTop: 20,
     alignItems: 'center',
   },
-  linkText: {
+  createAccountLine: {
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  createAccountPrefix: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '500',
+    color: MUTED_TEXT,
+  },
+  createAccountEmphasis: {
+    fontSize: 14,
+    fontWeight: '700',
     color: GOLD,
   },
 });

@@ -199,6 +199,7 @@ export default function CheckoutScreen() {
   const [cardDetails, setCardDetails] = useState<CardFieldInput.Details | null>(null);
   const [stripeReady, setStripeReady] = useState(false);
   const [loadingStripe, setLoadingStripe] = useState(false);
+  const stripeInitStartedRef = useRef(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const toastOpacity = useRef(new Animated.Value(0)).current;
   const [orderMode, setOrderMode] = useState<OrderMode>(null);
@@ -214,6 +215,12 @@ export default function CheckoutScreen() {
   const lastSyncedDefaultAddressIdRef = useRef<string | null>(null);
   /** Extra bottom padding while keyboard is open so Stripe CardField + inputs scroll above the keyboard. */
   const [keyboardBottomInset, setKeyboardBottomInset] = useState(0);
+
+  const summaryItems = useMemo(() => {
+    return items.map((cartItem) => ({ cartItem, lineTotal: getLineTotal(cartItem) }));
+  }, [items]);
+
+  const itemsForOrderPayload = useMemo(() => formatItemsForOrder(items), [items]);
 
   useEffect(() => {
     const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -452,6 +459,8 @@ export default function CheckoutScreen() {
   const ensureStripeIsReady = async () => {
     if (stripeReady) return;
     if (loadingStripe) return;
+    if (stripeInitStartedRef.current) return;
+    stripeInitStartedRef.current = true;
 
     setLoadingStripe(true);
     try {
@@ -463,6 +472,10 @@ export default function CheckoutScreen() {
         publishableKey: config.publishableKey,
       });
       setStripeReady(true);
+    } catch (e) {
+      // Allow retry on next attempt if init failed.
+      stripeInitStartedRef.current = false;
+      throw e;
     } finally {
       setLoadingStripe(false);
     }
@@ -595,7 +608,7 @@ export default function CheckoutScreen() {
           : 'Take away';
       const placedOrder = await placeOrder({
         customer,
-        items: formatItemsForOrder(items),
+        items: itemsForOrderPayload,
         type: orderTypePayload,
         amount: formatPrice(payableTotal.toFixed(2)),
         address: addressPayload,
@@ -874,7 +887,7 @@ export default function CheckoutScreen() {
             </View>
           ) : (
             <View style={styles.summaryPanel}>
-              {items.map((cartItem, index) => (
+              {summaryItems.map(({ cartItem, lineTotal }, index) => (
                 <View
                   key={cartItem.id}
                   style={[styles.cartRow, index < items.length - 1 && styles.cartRowDivider]}
@@ -895,7 +908,7 @@ export default function CheckoutScreen() {
                       </Text>
                       <View style={styles.cartRowPriceBlock}>
                         <Text style={styles.cartRowPrice}>
-                          {formatPrice(String(getLineTotal(cartItem).toFixed(2)))}
+                          {formatPrice(String(lineTotal.toFixed(2)))}
                         </Text>
                         <Text style={styles.qtyReadonly}>×{cartItem.quantity}</Text>
                       </View>

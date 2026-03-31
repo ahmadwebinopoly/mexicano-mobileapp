@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -140,7 +140,7 @@ export default function ItemDetailScreen() {
   const editingCartItemId = route.params?.cartItemId;
   const editingCartItem = editingCartItemId ? cartItems.find((c) => c.id === editingCartItemId) : undefined;
   const isEditingCartItem = Boolean(editingCartItemId && editingCartItem);
-  const addons: AddonItem[] = (item?.addons ?? []).map(normalizeAddonFromItem);
+  const addons: AddonItem[] = useMemo(() => (item?.addons ?? []).map(normalizeAddonFromItem), [item?.addons]);
   const addonGridRows = useMemo(() => {
     const rows: { left?: AddonItem; right?: AddonItem }[] = [];
     for (let i = 0; i < addons.length; i += 2) {
@@ -197,7 +197,7 @@ export default function ItemDetailScreen() {
     }, [])
   );
 
-  const chooseAddress = async (addressId: string) => {
+  const chooseAddress = useCallback(async (addressId: string) => {
     try {
       await setAddressAsDefault(addressId);
       const def = await getAddress();
@@ -206,7 +206,7 @@ export default function ItemDetailScreen() {
     } catch {
       // keep current selection on failure
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (!item) return;
@@ -282,14 +282,14 @@ export default function ItemDetailScreen() {
     };
   }, [orderMode]);
 
-  const toggleAddon = (id: string) => {
+  const toggleAddon = useCallback((id: string) => {
     setSelectedAddonIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  };
+  }, []);
 
   const getAddonsSignature = (addonsList: Array<{ id?: string; name?: string; price?: string }>): string => {
     return addonsList
@@ -335,11 +335,16 @@ export default function ItemDetailScreen() {
     });
   }, [cartItems, isEditingCartItem, item?.id, selectedAddonsSig, selectedInstructionsTrim]);
 
-  const mainPrice = item?.price ? parseFloat(String(item.price).replace(/[$,]/g, '')) || 0 : 0;
-  const addonsTotal = addons
-    .filter((a) => selectedAddonIds.has(a.id))
-    .reduce((sum, a) => sum + (parseFloat(String(a.price).replace(/[$,]/g, '')) || 0), 0);
-  const total = (mainPrice + addonsTotal) * Math.max(1, quantity);
+  const mainPrice = useMemo(
+    () => (item?.price ? parseFloat(String(item.price).replace(/[$,]/g, '')) || 0 : 0),
+    [item?.price]
+  );
+  const addonsTotal = useMemo(() => {
+    return addons
+      .filter((a) => selectedAddonIds.has(a.id))
+      .reduce((sum, a) => sum + (parseFloat(String(a.price).replace(/[$,]/g, '')) || 0), 0);
+  }, [addons, selectedAddonIds]);
+  const total = useMemo(() => (mainPrice + addonsTotal) * Math.max(1, quantity), [addonsTotal, mainPrice, quantity]);
 
   if (!item) {
     return (

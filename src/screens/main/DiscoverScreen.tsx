@@ -241,6 +241,66 @@ export interface DiscoverMenuItem {
   addons?: DiscoverAddonRaw[];
 }
 
+const ProductGridCard = React.memo(function ProductGridCard(props: {
+  item: DiscoverMenuItem;
+  onPress: (item: DiscoverMenuItem) => void;
+  onQuickAdd: (item: DiscoverMenuItem) => void;
+}) {
+  const { item, onPress, onQuickAdd } = props;
+  const rating = getDisplayRating(item);
+  const stars = getStarIconNamesForItem(item);
+  return (
+    <Pressable
+      style={[styles.productGridCard, styles.menuGridCell]}
+      onPress={() => onPress(item)}
+    >
+      <View style={styles.productGridTopRow}>
+        <View style={styles.productGridTopLeftRow}>
+          <View style={styles.productGridStarsRow}>
+            {stars.map((name, i) => (
+              <MaterialIcons key={`${item.id}-star-${i}-${name}`} name={name} size={16} color={GOLD} />
+            ))}
+          </View>
+          {rating ? (
+            <Text style={styles.productGridRating} numberOfLines={1}>
+              {rating}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+
+      <View style={styles.productGridImageCircle}>
+        {item.image ? (
+          <Image source={item.image} style={styles.productGridImageCircleImg} resizeMode="cover" />
+        ) : (
+          <View style={styles.productGridImageCircleSkeleton}>
+            <MaterialIcons name="image-not-supported" size={22} color="rgba(255,255,255,0.35)" />
+          </View>
+        )}
+      </View>
+
+      <Text style={styles.productGridName} numberOfLines={1}>
+        {item.name}
+      </Text>
+
+      <View style={styles.productGridBottomRow}>
+        <Text style={styles.productGridPrice}>{formatPrice(item.price)}</Text>
+        <Pressable
+          style={styles.productGridAddBtn}
+          onPress={(e) => {
+            e.stopPropagation?.();
+            onQuickAdd(item);
+          }}
+          hitSlop={8}
+          accessibilityLabel="Quick add to cart"
+        >
+          <MaterialIcons name="add" size={14} color={BG_DARK} />
+        </Pressable>
+      </View>
+    </Pressable>
+  );
+});
+
 function mapApiItemToDiscover(item: ApiMenuItem & { addons?: unknown[]; cookingTime?: string }): DiscoverMenuItem {
   const raw = item.image;
   const image =
@@ -366,6 +426,7 @@ export default function DiscoverScreen() {
   const toastOpacity = useRef(new Animated.Value(0)).current;
   const restaurantCoordsRef = useRef<Coordinates | null>(null);
   const restaurantCoordsInFlightRef = useRef<Promise<Coordinates | null> | null>(null);
+  const lastWishlistLoadedAtRef = useRef(0);
 
   useEffect(() => {
     if (!toast) return;
@@ -381,15 +442,20 @@ export default function DiscoverScreen() {
     setToast({ message, type });
   }, []);
 
-  const loadWishlist = useCallback(async () => {
+  const loadWishlist = useCallback(async (opts?: { force?: boolean }) => {
     try {
       const token = await getToken();
       if (!token) {
         setIsLoggedIn(false);
         setWishlistIds(new Set());
+        lastWishlistLoadedAtRef.current = 0;
         return;
       }
       setIsLoggedIn(true);
+      const now = Date.now();
+      if (!opts?.force && lastWishlistLoadedAtRef.current && now - lastWishlistLoadedAtRef.current < 30_000) {
+        return;
+      }
       const data = await getWishlist();
       const items = Array.isArray((data as any)?.items) ? (data as any).items : [];
       const ids = new Set<string>();
@@ -398,9 +464,11 @@ export default function DiscoverScreen() {
         if (rawId != null) ids.add(String(rawId));
       });
       setWishlistIds(ids);
+      lastWishlistLoadedAtRef.current = Date.now();
     } catch {
       setIsLoggedIn(false);
       setWishlistIds(new Set());
+      lastWishlistLoadedAtRef.current = 0;
     }
   }, []);
 
@@ -482,6 +550,8 @@ export default function DiscoverScreen() {
   const handleItemPress = (item: DiscoverMenuItem) => {
     navigation.getParent()?.navigate('ItemDetail', { item });
   };
+
+  const onPressItem = useCallback((item: DiscoverMenuItem) => handleItemPress(item), [navigation]);
 
   const handleQuickAdd = useCallback(
     (item: DiscoverMenuItem) => {
@@ -646,7 +716,7 @@ export default function DiscoverScreen() {
       let active = true;
       (async () => {
         try {
-          // Keep wishlist/login state fresh whenever user visits this screen.
+          // Keep wishlist/login state fresh, but avoid refetching too frequently.
           await loadWishlist();
 
           const mode = await readOrderModeFromStorage();
@@ -720,6 +790,26 @@ export default function DiscoverScreen() {
         active = false;
       };
     }, [loadWishlist])
+  );
+
+  const renderGridRow = useCallback(
+    (info: any) => {
+      const { item: row, section, index } = info as {
+        item: DiscoverGridRow;
+        section: { data: readonly DiscoverGridRow[] };
+        index: number;
+      };
+      const isLastRow = index === section.data.length - 1;
+      const left = row.left;
+      const right = row.right;
+      return (
+        <View style={[styles.menuGridRow, isLastRow && styles.menuGridRowLast]}>
+          {left ? <ProductGridCard item={left} onPress={onPressItem} onQuickAdd={handleQuickAdd} /> : null}
+          {right ? <ProductGridCard item={right} onPress={onPressItem} onQuickAdd={handleQuickAdd} /> : null}
+        </View>
+      );
+    },
+    [handleQuickAdd, onPressItem]
   );
 
   const openMapForCurrentMode = useCallback(() => {
@@ -1428,6 +1518,10 @@ export default function DiscoverScreen() {
           styles.scrollContent,
           showStickyTabs && !isSearching && { paddingTop: TABS_WRAP_HEIGHT },
         ]}
+        removeClippedSubviews
+        windowSize={9}
+        maxToRenderPerBatch={8}
+        updateCellsBatchingPeriod={50}
         sections={
           loading
             ? []
@@ -1445,116 +1539,7 @@ export default function DiscoverScreen() {
             </View>
           );
         }}
-        renderItem={({ item: row, section, index }) => {
-          const isLastRow = index === section.data.length - 1;
-          const left = row.left;
-          const right = row.right;
-          return (
-            <View style={[styles.menuGridRow, isLastRow && styles.menuGridRowLast]}>
-              {left ? (
-                <Pressable
-                  style={[styles.productGridCard, styles.menuGridCell]}
-                  onPress={() => handleItemPress(left)}
-                >
-                  <View style={styles.productGridTopRow}>
-                    <View style={styles.productGridTopLeftRow}>
-                      <View style={styles.productGridStarsRow}>
-                        {getStarIconNamesForItem(left).map((name, i) => (
-                          <MaterialIcons key={`${left.id}-star-${i}-${name}`} name={name} size={16} color={GOLD} />
-                        ))}
-                      </View>
-                      {getDisplayRating(left) ? (
-                        <Text style={styles.productGridRating} numberOfLines={1}>
-                          {getDisplayRating(left)}
-                        </Text>
-                      ) : null}
-                    </View>
-                  </View>
-
-                  <View style={styles.productGridImageCircle}>
-                    {left.image ? (
-                      <Image source={left.image} style={styles.productGridImageCircleImg} resizeMode="cover" />
-                    ) : (
-                      <View style={styles.productGridImageCircleSkeleton}>
-                        <MaterialIcons name="image-not-supported" size={22} color="rgba(255,255,255,0.35)" />
-                      </View>
-                    )}
-                  </View>
-
-                  <Text style={styles.productGridName} numberOfLines={1}>
-                    {left.name}
-                  </Text>
-
-                  <View style={styles.productGridBottomRow}>
-                    <Text style={styles.productGridPrice}>{formatPrice(left.price)}</Text>
-                    <Pressable
-                      style={styles.productGridAddBtn}
-                      onPress={(e) => {
-                        e.stopPropagation?.();
-                        handleQuickAdd(left);
-                      }}
-                      hitSlop={8}
-                      accessibilityLabel="Quick add to cart"
-                    >
-                      <MaterialIcons name="add" size={14} color={BG_DARK} />
-                    </Pressable>
-                  </View>
-                </Pressable>
-              ) : null}
-
-              {right ? (
-                <Pressable
-                  style={[styles.productGridCard, styles.menuGridCell]}
-                  onPress={() => handleItemPress(right)}
-                >
-                  <View style={styles.productGridTopRow}>
-                    <View style={styles.productGridTopLeftRow}>
-                      <View style={styles.productGridStarsRow}>
-                        {getStarIconNamesForItem(right).map((name, i) => (
-                          <MaterialIcons key={`${right.id}-star-${i}-${name}`} name={name} size={16} color={GOLD} />
-                        ))}
-                      </View>
-                      {getDisplayRating(right) ? (
-                        <Text style={styles.productGridRating} numberOfLines={1}>
-                          {getDisplayRating(right)}
-                        </Text>
-                      ) : null}
-                    </View>
-                  </View>
-
-                  <View style={styles.productGridImageCircle}>
-                    {right.image ? (
-                      <Image source={right.image} style={styles.productGridImageCircleImg} resizeMode="cover" />
-                    ) : (
-                      <View style={styles.productGridImageCircleSkeleton}>
-                        <MaterialIcons name="image-not-supported" size={22} color="rgba(255,255,255,0.35)" />
-                      </View>
-                    )}
-                  </View>
-
-                  <Text style={styles.productGridName} numberOfLines={1}>
-                    {right.name}
-                  </Text>
-
-                  <View style={styles.productGridBottomRow}>
-                    <Text style={styles.productGridPrice}>{formatPrice(right.price)}</Text>
-                    <Pressable
-                      style={styles.productGridAddBtn}
-                      onPress={(e) => {
-                        e.stopPropagation?.();
-                        handleQuickAdd(right);
-                      }}
-                      hitSlop={8}
-                      accessibilityLabel="Quick add to cart"
-                    >
-                      <MaterialIcons name="add" size={14} color={BG_DARK} />
-                    </Pressable>
-                  </View>
-                </Pressable>
-              ) : null}
-            </View>
-          );
-        }}
+        renderItem={renderGridRow}
         stickySectionHeadersEnabled={false}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
@@ -1562,9 +1547,6 @@ export default function DiscoverScreen() {
         onScroll={handleScroll}
         scrollEventThrottle={48}
         initialNumToRender={8}
-        maxToRenderPerBatch={8}
-        windowSize={7}
-        removeClippedSubviews
         ListHeaderComponent={(
           <>
             {/* Banner (scrolls away) */}

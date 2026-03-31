@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Pressable,
   Image,
-  ScrollView,
+  FlatList,
   TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -68,6 +68,144 @@ export default function CartScreen() {
     return () => clearTimeout(t);
   }, []);
 
+  const cartRows = useMemo(() => {
+    return items.map((cartItem) => ({
+      cartItem,
+      lineTotal: getLineTotal(cartItem),
+    }));
+  }, [items]);
+
+  const keyExtractor = useCallback((row: { cartItem: CartItem }) => row.cartItem.id, []);
+
+  const handleOpenItem = useCallback(
+    (cartItem: CartItem) => {
+      const paramItem = mapCartItemToItemDetailParam(cartItem);
+      navigation.navigate('ItemDetail', { item: paramItem, cartItemId: cartItem.id });
+    },
+    [navigation]
+  );
+
+  const handleRemoveItem = useCallback(
+    (id: string) => {
+      removeItem(id);
+    },
+    [removeItem]
+  );
+
+  const handleUpdateQty = useCallback(
+    (id: string, qty: number) => {
+      updateQuantity(id, qty);
+    },
+    [updateQuantity]
+  );
+
+  const renderRow = useCallback(
+    ({ item }: { item: { cartItem: CartItem; lineTotal: number } }) => {
+      const { cartItem, lineTotal } = item;
+      return (
+        <Pressable
+          style={styles.cartGroupCard}
+          onPress={() => handleOpenItem(cartItem)}
+          accessibilityRole="button"
+          accessibilityLabel={`View ${cartItem.name}`}
+        >
+          <View style={styles.cartCard} pointerEvents="box-none">
+            <View style={styles.cartCardImageWrap}>
+              {cartItem.image ? (
+                <Image source={cartItem.image} style={styles.cartCardImage} resizeMode="cover" />
+              ) : (
+                <View style={styles.cartCardImageSkeleton}>
+                  <MaterialIcons name="image-not-supported" size={28} color="rgba(255,255,255,0.35)" />
+                </View>
+              )}
+            </View>
+            <View style={styles.cartCardBody}>
+              <View style={styles.cartCardTitleRow}>
+                <Text style={styles.cartCardName} numberOfLines={2}>
+                  {cartItem.name}
+                </Text>
+                <Text style={styles.cartCardPrice}>{formatPrice(String(lineTotal.toFixed(2)))}</Text>
+              </View>
+              {String(cartItem.instructions ?? '').trim() ? (
+                <TextInput
+                  editable={false}
+                  multiline
+                  scrollEnabled={false}
+                  value={`Notes: ${String(cartItem.instructions).trim()}`}
+                  style={styles.cartNotesField}
+                />
+              ) : null}
+              <View style={styles.quantityRow}>
+                {cartItem.quantity <= 1 ? (
+                  <Pressable
+                    style={styles.quantityBtn}
+                    onPress={(e) => {
+                      e.stopPropagation?.();
+                      handleRemoveItem(cartItem.id);
+                    }}
+                  >
+                    <MaterialIcons name="delete-outline" size={20} color={BG_DARK} />
+                  </Pressable>
+                ) : (
+                  <Pressable
+                    style={styles.quantityBtn}
+                    onPress={(e) => {
+                      e.stopPropagation?.();
+                      handleUpdateQty(cartItem.id, cartItem.quantity - 1);
+                    }}
+                  >
+                    <Text style={styles.quantityBtnText}>−</Text>
+                  </Pressable>
+                )}
+                <View style={styles.quantityBadge}>
+                  <Text style={styles.quantityText}>{cartItem.quantity}</Text>
+                </View>
+                <Pressable
+                  style={styles.quantityBtn}
+                  onPress={(e) => {
+                    e.stopPropagation?.();
+                    handleUpdateQty(cartItem.id, cartItem.quantity + 1);
+                  }}
+                >
+                  <Text style={styles.quantityBtnText}>+</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+
+          {Array.isArray(cartItem.addons) &&
+            cartItem.addons.map((addon) => (
+              <View key={`${cartItem.id}-${addon.id}`} style={styles.addonItemCard}>
+                <View style={styles.addonItemIconWrap}>
+                  {addon.image ? (
+                    <Image
+                      source={typeof addon.image === 'string' ? { uri: addon.image } : addon.image}
+                      style={styles.addonItemImage}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <MaterialIcons name="image-not-supported" size={18} color="rgba(255,255,255,0.45)" />
+                  )}
+                </View>
+                <View style={styles.addonItemBody}>
+                  <Text style={styles.addonItemName} numberOfLines={1}>
+                    {addon.name}
+                  </Text>
+                  <View style={styles.addonItemMetaRow}>
+                    <Text style={styles.addonItemPrice}>
+                      {formatPrice(String((parsePrice(addon.price) * cartItem.quantity).toFixed(2)))}
+                    </Text>
+                    <Text style={styles.addonItemQty}>×{cartItem.quantity}</Text>
+                  </View>
+                </View>
+              </View>
+            ))}
+        </Pressable>
+      );
+    },
+    [handleOpenItem, handleRemoveItem, handleUpdateQty]
+  );
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
       {/* Header */}
@@ -80,134 +218,32 @@ export default function CartScreen() {
       </View>
 
       {/* Cart items list */}
-      <ScrollView
+      <FlatList
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
+        data={showSkeleton || items.length === 0 ? [] : cartRows}
+        keyExtractor={keyExtractor}
+        renderItem={renderRow}
+        removeClippedSubviews
+        windowSize={9}
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        updateCellsBatchingPeriod={50}
         showsVerticalScrollIndicator={false}
-      >
-        {showSkeleton ? (
-          <CartScreenSkeleton />
-        ) : items.length === 0 ? (
-          <View style={styles.emptyState}>
-            <MaterialIcons name="shopping-cart" size={56} color="rgba(255,255,255,0.35)" />
-            <Text style={styles.emptyStateTitle}>Your cart is empty</Text>
-            <Text style={styles.emptyStateSub}>Add items from the menu to see them here.</Text>
-          </View>
-        ) : (
-          items.map((cartItem) => (
-            <Pressable
-              key={cartItem.id}
-              style={styles.cartGroupCard}
-              onPress={() => {
-                const paramItem = mapCartItemToItemDetailParam(cartItem);
-                // CartScreen is already in RootNavigator stack, so navigate directly.
-                // (Using getParent() can be null here and would no-op.)
-                navigation.navigate('ItemDetail', { item: paramItem, cartItemId: cartItem.id });
-              }}
-              accessibilityRole="button"
-              accessibilityLabel={`View ${cartItem.name}`}
-            >
-            <View style={styles.cartCard} pointerEvents="box-none">
-              <View style={styles.cartCardImageWrap}>
-                {cartItem.image ? (
-                  <Image
-                    source={cartItem.image}
-                    style={styles.cartCardImage}
-                    resizeMode="cover"
-                  />
-                ) : (
-                  <View style={styles.cartCardImageSkeleton}>
-                    <MaterialIcons name="image-not-supported" size={28} color="rgba(255,255,255,0.35)" />
-                  </View>
-                )}
-              </View>
-              <View style={styles.cartCardBody}>
-                <View style={styles.cartCardTitleRow}>
-                  <Text style={styles.cartCardName} numberOfLines={2}>
-                    {cartItem.name}
-                  </Text>
-                  <Text style={styles.cartCardPrice}>
-                    {formatPrice(String(getLineTotal(cartItem).toFixed(2)))}
-                  </Text>
-                </View>
-                {String(cartItem.instructions ?? '').trim() ? (
-                  <TextInput
-                    editable={false}
-                    multiline
-                    scrollEnabled={false}
-                    value={`Notes: ${String(cartItem.instructions).trim()}`}
-                    style={styles.cartNotesField}
-                  />
-                ) : null}
-                <View style={styles.quantityRow}>
-                  {cartItem.quantity <= 1 ? (
-                    <Pressable
-                      style={styles.quantityBtn}
-                      onPress={(e) => {
-                        e.stopPropagation?.();
-                        removeItem(cartItem.id);
-                      }}
-                    >
-                      <MaterialIcons name="delete-outline" size={20} color={BG_DARK} />
-                    </Pressable>
-                  ) : (
-                    <Pressable
-                      style={styles.quantityBtn}
-                      onPress={(e) => {
-                        e.stopPropagation?.();
-                        updateQuantity(cartItem.id, cartItem.quantity - 1);
-                      }}
-                    >
-                      <Text style={styles.quantityBtnText}>−</Text>
-                    </Pressable>
-                  )}
-                  <View style={styles.quantityBadge}>
-                    <Text style={styles.quantityText}>{cartItem.quantity}</Text>
-                  </View>
-                  <Pressable
-                    style={styles.quantityBtn}
-                    onPress={(e) => {
-                      e.stopPropagation?.();
-                      updateQuantity(cartItem.id, cartItem.quantity + 1);
-                    }}
-                  >
-                    <Text style={styles.quantityBtnText}>+</Text>
-                  </Pressable>
-                </View>
-              </View>
+        keyboardShouldPersistTaps="handled"
+        ListHeaderComponent={
+          showSkeleton ? (
+            <CartScreenSkeleton />
+          ) : items.length === 0 ? (
+            <View style={styles.emptyState}>
+              <MaterialIcons name="shopping-cart" size={56} color="rgba(255,255,255,0.35)" />
+              <Text style={styles.emptyStateTitle}>Your cart is empty</Text>
+              <Text style={styles.emptyStateSub}>Add items from the menu to see them here.</Text>
             </View>
-            {Array.isArray(cartItem.addons) &&
-              cartItem.addons.map((addon) => (
-                <View key={`${cartItem.id}-${addon.id}`} style={styles.addonItemCard}>
-                  <View style={styles.addonItemIconWrap}>
-                    {addon.image ? (
-                      <Image
-                        source={typeof addon.image === 'string' ? { uri: addon.image } : addon.image}
-                        style={styles.addonItemImage}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <MaterialIcons name="image-not-supported" size={18} color="rgba(255,255,255,0.45)" />
-                    )}
-                  </View>
-                  <View style={styles.addonItemBody}>
-                    <Text style={styles.addonItemName} numberOfLines={1}>
-                      {addon.name}
-                    </Text>
-                    <View style={styles.addonItemMetaRow}>
-                      <Text style={styles.addonItemPrice}>
-                        {formatPrice(String((parsePrice(addon.price) * cartItem.quantity).toFixed(2)))}
-                      </Text>
-                      <Text style={styles.addonItemQty}>×{cartItem.quantity}</Text>
-                    </View>
-                  </View>
-                </View>
-              ))}
-            </Pressable>
-          ))
-        )}
-        <View style={styles.bottomSpacer} />
-      </ScrollView>
+          ) : null
+        }
+        ListFooterComponent={<View style={styles.bottomSpacer} />}
+      />
 
       {/* Footer – same as OrderDetails/ItemDetail footer */}
       <View style={styles.bottomBar}>

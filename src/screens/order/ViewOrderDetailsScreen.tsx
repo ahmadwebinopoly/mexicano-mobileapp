@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Notifications from 'expo-notifications';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const WebView = require('react-native-webview').WebView;
 import { getNetworkErrorMessage } from '../../api/apiConfig';
@@ -41,6 +42,16 @@ const MAP_WIDTH = SCREEN_WIDTH - HORIZONTAL_PADDING * 2;
 type RouteParams = {
   orderId: string;
 };
+
+function buildOrderIdCandidates(raw: string): string[] {
+  const base = String(raw ?? '').trim();
+  if (!base) return [];
+  const noHash = base.startsWith('#') ? base.slice(1) : base;
+  const digitsOnly = base.replace(/[^\d]/g, '');
+  return Array.from(
+    new Set([base, noHash, digitsOnly].map((s) => String(s).trim()).filter(Boolean))
+  );
+}
 
 function normalizeStatus(status: string | undefined): string {
   return (status || '').trim().toLowerCase();
@@ -393,6 +404,7 @@ export default function ViewOrderDetailsScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const { orderId } = (route.params || {}) as RouteParams;
+  const orderIdCandidates = useMemo(() => buildOrderIdCandidates(orderId), [orderId]);
 
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
@@ -523,10 +535,27 @@ export default function ViewOrderDetailsScreen() {
   const findOrderInResponse = useCallback(
     (data: MyOrdersResponse): Order | null => {
       const all = [...(data.current || []), ...(data.history || [])];
-      const found = all.find((o) => String(o.id) === String(orderId));
+      const found = all.find((o) => {
+        const oo = o as Order & { orderId?: unknown; order_id?: unknown; _id?: unknown };
+        const fields = [
+          oo.id,
+          oo.orderId,
+          oo.order_id,
+          oo._id,
+          // Display variant we show in UI (often "#<id>")
+          getOrderNumberDisplay(oo),
+        ]
+          .map((v) => (v == null ? '' : String(v).trim()))
+          .filter(Boolean);
+
+        for (const candidate of orderIdCandidates) {
+          if (fields.some((f) => f === candidate || f === `#${candidate}`)) return true;
+        }
+        return false;
+      });
       return found || null;
     },
-    [orderId]
+    [orderIdCandidates]
   );
 
   useEffect(() => {
@@ -558,7 +587,7 @@ export default function ViewOrderDetailsScreen() {
       let isMounted = true;
       setErrorMsg(null);
 
-      const poll = async () => {
+      const refreshOnce = async () => {
         try {
           const data = await getMyOrders();
           if (!isMounted) return;
@@ -573,17 +602,41 @@ export default function ViewOrderDetailsScreen() {
         }
       };
 
-      void poll();
-      const intervalId = setInterval(() => {
-        void poll();
-      }, 2000);
+      void refreshOnce();
 
       return () => {
         isMounted = false;
-        clearInterval(intervalId);
       };
     }, [findOrderInResponse])
   );
+
+  // Push-driven refresh: update this screen when backend sends order_status push
+  useEffect(() => {
+    let mounted = true;
+    const refreshFromPushOnce = async () => {
+      try {
+        const data2 = await getMyOrders();
+        if (!mounted) return;
+        setOrder(findOrderInResponse(data2));
+      } catch {
+        // Ignore; keep current UI
+      }
+    };
+    const sub = Notifications.addNotificationReceivedListener((notification) => {
+      if (!mounted) return;
+      const data = (notification as any)?.request?.content?.data ?? {};
+      if (String((data as any)?.type ?? '') !== 'order_status') return;
+      const raw = String((data as any)?.orderId ?? '').trim();
+      const candidate = raw.replace(/[^\d]/g, '') || raw.replace(/^#/, '');
+      if (!candidate) return;
+      if (!orderIdCandidates.some((c) => c === candidate || c === `#${candidate}`)) return;
+      void refreshFromPushOnce();
+    });
+    return () => {
+      mounted = false;
+      sub.remove();
+    };
+  }, [orderIdCandidates, findOrderInResponse]);
 
   useFocusEffect(
     useCallback(() => {

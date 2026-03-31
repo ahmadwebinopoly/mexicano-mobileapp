@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import { logout as logoutApi } from '../../api/auth';
 import { getCurrentUser, type ProfileUser } from '../../api/profile';
 import { unregisterFromPushNotifications } from '../../services/pushNotifications';
 import { deleteAccount } from '../../api/deleteapi';
+import { getToken } from '../../storagetank';
 
 const TOAST_DURATION = 2800;
 
@@ -48,16 +49,24 @@ export default function ProfileScreen() {
     ]).start(() => setToast(null));
   }, [toast, toastOpacity]);
 
-  const showToast = (message: string, type: 'success' | 'error') => {
+  const showToast = useCallback((message: string, type: 'success' | 'error') => {
     setToast({ message, type });
-  };
+  }, []);
 
-  const loadCurrentUser = async () => {
+  const loadCurrentUser = useCallback(async () => {
     setLoadingUser(true);
-    const user = await getCurrentUser();
-    setCurrentUser(user);
-    setLoadingUser(false);
-  };
+    try {
+      const token = await getToken();
+      if (!token) {
+        setCurrentUser(null);
+        return;
+      }
+      const user = await getCurrentUser();
+      setCurrentUser(user);
+    } finally {
+      setLoadingUser(false);
+    }
+  }, []);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -65,14 +74,14 @@ export default function ProfileScreen() {
     }, [])
   );
 
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
     await unregisterFromPushNotifications();
     await logoutApi().catch(() => {});
     setCurrentUser(null);
     showToast('Signed out.', 'success');
-  };
+  }, [showToast]);
 
-  const handleDeleteAccount = async () => {
+  const handleDeleteAccount = useCallback(async () => {
     if (deletingAccount) return;
     setDeletingAccount(true);
     try {
@@ -89,7 +98,12 @@ export default function ProfileScreen() {
     } finally {
       setDeletingAccount(false);
     }
-  };
+  }, [deletingAccount, navigation, showToast]);
+
+  const onPressSignIn = useCallback(() => navigateToLoginRegister(), []);
+  const onPressOrders = useCallback(() => navigation.getParent()?.navigate('Orders'), [navigation]);
+  const onPressAddresses = useCallback(() => navigation.getParent()?.navigate('Address'), [navigation]);
+  const onPressWishlist = useCallback(() => navigation.getParent()?.navigate('Wishlist'), [navigation]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
@@ -99,7 +113,15 @@ export default function ProfileScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* Profile hero */}
-        {currentUser ? (
+        {loadingUser ? (
+          <View style={styles.profileHero}>
+            <View style={styles.avatarWrapLarge}>
+              <View style={[styles.avatarCircleLarge, styles.heroSkeletonCircle]} />
+            </View>
+            <View style={styles.heroSkeletonLine} />
+            <View style={[styles.heroSkeletonLine, styles.heroSkeletonLineSmall]} />
+          </View>
+        ) : currentUser ? (
           <View style={styles.profileHero}>
             <View style={styles.avatarWrapLarge}>
               <View style={styles.avatarCircleLarge}>
@@ -126,7 +148,7 @@ export default function ProfileScreen() {
                 <Text style={styles.heroName}>Hi, guest!</Text>
                 <Text style={styles.heroEmail}>Log in to make an order</Text>
               </View>
-              <Pressable style={styles.signInHeroButton} onPress={() => navigateToLoginRegister()}>
+              <Pressable style={styles.signInHeroButton} onPress={onPressSignIn}>
                 <Text style={styles.signInText}>Sign In</Text>
               </Pressable>
             </View>
@@ -134,12 +156,12 @@ export default function ProfileScreen() {
         )}
 
         {/* Settings list (only when logged in) */}
-        {currentUser ? (
+        {!loadingUser && currentUser ? (
           <>
           <View style={styles.listCard}>
             <Pressable
               style={styles.listItem}
-              onPress={() => navigation.getParent()?.navigate('Orders')}
+              onPress={onPressOrders}
             >
               <View style={styles.listItemLeft}>
                 <View style={styles.listItemIconWrap}>
@@ -157,7 +179,7 @@ export default function ProfileScreen() {
 
             <Pressable
               style={styles.listItem}
-              onPress={() => navigation.getParent()?.navigate('Address')}
+              onPress={onPressAddresses}
             >
               <View style={styles.listItemLeft}>
                 <View style={styles.listItemIconWrap}>
@@ -175,7 +197,7 @@ export default function ProfileScreen() {
 
             <Pressable
               style={styles.listItem}
-              onPress={() => navigation.getParent()?.navigate('Wishlist')}
+              onPress={onPressWishlist}
             >
               <View style={styles.listItemLeft}>
                 <View style={styles.listItemIconWrap}>
@@ -356,6 +378,24 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '800',
     color: GOLD,
+  },
+  heroSkeletonCircle: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+  },
+  heroSkeletonLine: {
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    alignSelf: 'center',
+    width: '68%',
+    marginTop: 10,
+  },
+  heroSkeletonLineSmall: {
+    height: 12,
+    width: '52%',
+    marginTop: 8,
   },
   heroName: {
     fontSize: 15,

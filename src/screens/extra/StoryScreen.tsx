@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -20,25 +20,35 @@ export default function StoryScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const storyText = useMemo(() => (story || '').trim(), [story]);
+
+  const loadStory = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const text = await getStory();
+      setStory(text || '');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load story');
+      setStory('');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setLoading(true);
-      setError(null);
       try {
-        const text = await getStory();
-        if (!cancelled) setStory(text || '');
+        await loadStory();
       } catch (e) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : 'Failed to load story');
-          setStory('');
-        }
+        // handled in loadStory
       } finally {
-        if (!cancelled) setLoading(false);
+        // handled in loadStory
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [loadStory]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
@@ -46,6 +56,8 @@ export default function StoryScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        removeClippedSubviews
+        keyboardShouldPersistTaps="handled"
       >
         <Text style={styles.title}>Brand Story</Text>
         {loading ? (
@@ -56,7 +68,7 @@ export default function StoryScreen() {
           </View>
         ) : (
           <View style={styles.contentBox}>
-            <Text style={styles.body}>{story || 'No story content yet.'}</Text>
+            <Text style={styles.body}>{storyText || 'No story content yet.'}</Text>
           </View>
         )}
       </ScrollView>

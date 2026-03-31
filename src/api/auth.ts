@@ -23,6 +23,8 @@ const GOOGLE_AUTH_CODE_URL =
 const ENDPOINTS = {
   register: `${BASE_URL}/api/auth/register`,
   login: `${BASE_URL}/api/auth/login`,
+  forgotPassword: `${BASE_URL}/api/auth/forgot-password`,
+  resetPassword: `${BASE_URL}/api/auth/reset-password`,
   google: GOOGLE_LOGIN_URL,
   googleAuthCode: GOOGLE_AUTH_CODE_URL,
   logout: `${BASE_URL}/api/auth/logout`,
@@ -80,6 +82,32 @@ export interface LoginResponse {
   accessToken?: string;
   access_token?: string;
   [key: string]: unknown;
+}
+
+export interface ForgotPasswordPayload {
+  email: string;
+  client?: 'mobile';
+}
+
+export interface ForgotPasswordResponse {
+  ok: boolean;
+}
+
+export interface ResetPasswordPayload {
+  token: string;
+  password: string;
+}
+
+export interface ResetPasswordResponse {
+  ok: boolean;
+}
+
+async function readErrorMessage(res: Response): Promise<string> {
+  const json = (await res.json().catch(() => null)) as null | { message?: unknown };
+  const msg = json && typeof json.message === 'string' ? json.message : '';
+  if (msg) return msg;
+  const text = await res.text().catch(() => '');
+  return text || `API error: ${res.status} ${res.statusText}`;
 }
 
 export interface GoogleLoginResponse {
@@ -222,6 +250,44 @@ export async function login(payload: LoginPayload): Promise<LoginResponse> {
     await saveToken(token);
   }
   return data;
+}
+
+/**
+ * POST /api/auth/forgot-password – request reset email (generic response)
+ * Body: { email, client: "mobile" }
+ * Returns: { ok: true } (always generic even for unknown email)
+ */
+export async function forgotPassword(payload: ForgotPasswordPayload): Promise<ForgotPasswordResponse> {
+  const email = String(payload.email ?? '').trim().toLowerCase();
+  if (!email) throw new Error('Email is required.');
+  const res = await fetch(ENDPOINTS.forgotPassword, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, client: payload.client ?? 'mobile' }),
+  });
+  if (!res.ok) throw new Error(await readErrorMessage(res));
+  const data = (await res.json().catch(() => ({}))) as Partial<ForgotPasswordResponse>;
+  return { ok: Boolean(data.ok ?? true) };
+}
+
+/**
+ * POST /api/auth/reset-password – reset using token
+ * Body: { token, password }
+ * Returns: { ok: true }
+ */
+export async function resetPassword(payload: ResetPasswordPayload): Promise<ResetPasswordResponse> {
+  const token = String(payload.token ?? '').trim();
+  const password = String(payload.password ?? '');
+  if (!token) throw new Error('Reset token required');
+  if (!password) throw new Error('Password is required.');
+  const res = await fetch(ENDPOINTS.resetPassword, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, password }),
+  });
+  if (!res.ok) throw new Error(await readErrorMessage(res));
+  const data = (await res.json().catch(() => ({}))) as Partial<ResetPasswordResponse>;
+  return { ok: Boolean(data.ok ?? true) };
 }
 
 /**

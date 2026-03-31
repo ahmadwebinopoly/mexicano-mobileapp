@@ -1,19 +1,21 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   ScrollView,
   TextInput,
   ActivityIndicator,
   Pressable,
   KeyboardAvoidingView,
   Platform,
+  Dimensions,
+  Linking,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { submitContact } from '../../api/content';
-import VisitScreen from './VisitScreen';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const WebView = require('react-native-webview').WebView;
+import { getVisit, submitContact, type VisitDayHours } from '../../api/content';
 import { ContactScreenSkeleton } from '../../components/skeleton';
 
 const TAB_BG = '#152C29';
@@ -23,44 +25,125 @@ const ACTIVE = '#FFC107';
 const INACTIVE = '#FFFFFF';
 const HORIZONTAL_PADDING = 20;
 const PLACEHOLDER_COLOR = 'rgba(255,255,255,0.5)';
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const MAP_HEIGHT = 200;
+const MAP_WIDTH = SCREEN_WIDTH - HORIZONTAL_PADDING * 2 - 32;
 
-type ContactErrors = { phone?: string; email?: string; message?: string };
+const DAYS_ORDER: string[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+function formatHours(hours: VisitDayHours | undefined): string {
+  if (!hours || !hours.open || !hours.close) return '—';
+  return `${hours.open} to ${hours.close}`;
+}
+
+type ContactErrors = { name?: string; phone?: string; email?: string; subject?: string; message?: string };
 
 export default function ContactScreen() {
   const insets = useSafeAreaInsets();
-  const [activeTab, setActiveTab] = useState<'Contact' | 'Visit'>('Contact');
+  const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
+  const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [showContactSkeleton, setShowContactSkeleton] = useState(true);
-  const [hasOpenedVisit, setHasOpenedVisit] = useState(false);
   const [errors, setErrors] = useState<ContactErrors>({});
   const [submitStatus, setSubmitStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [visitLoading, setVisitLoading] = useState(true);
+  const [visitError, setVisitError] = useState<string | null>(null);
+  const [visit, setVisit] = useState<any>(null);
 
   const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const submitStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setShowContactSkeleton(false), 200);
     return () => clearTimeout(t);
   }, []);
 
-  const onTabChange = useCallback((tab: 'Contact' | 'Visit') => {
-    setActiveTab(tab);
-    if (tab === 'Visit') setHasOpenedVisit(true);
+  useEffect(() => {
+    if (!submitStatus) return;
+    if (submitStatusTimerRef.current) clearTimeout(submitStatusTimerRef.current);
+    submitStatusTimerRef.current = setTimeout(() => setSubmitStatus(null), 2600);
+    return () => {
+      if (submitStatusTimerRef.current) clearTimeout(submitStatusTimerRef.current);
+      submitStatusTimerRef.current = null;
+    };
+  }, [submitStatus]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!cancelled) {
+          setVisitLoading(true);
+          setVisitError(null);
+        }
+        const data = await getVisit();
+        if (!cancelled) setVisit(data);
+      } catch (e) {
+        if (!cancelled) {
+          setVisitError(e instanceof Error ? e.message : 'Failed to load visit info');
+          setVisit(null);
+        }
+      } finally {
+        if (!cancelled) setVisitLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  const location = visit?.location ?? null;
+  const hours = visit?.hours ?? {};
+
+  const mapsUrl = useMemo(
+    () => location?.mapsUrl || 'https://maps.google.com/maps?q=Mexicano+restaurant&output=embed',
+    [location?.mapsUrl]
+  );
+
+  const mapHtml = useMemo(
+    () =>
+      `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <style>
+    * { margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    iframe { width: 100%; height: 100%; border: 0; }
+  </style>
+</head>
+<body>
+  <iframe src="${mapsUrl}" allowfullscreen loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+</body>
+</html>
+    `.trim(),
+    [mapsUrl]
+  );
+
+  const handleOpenMap = useCallback(() => {
+    const openUrl = mapsUrl.replace(/&output=embed/, '');
+    Linking.openURL(openUrl).catch(() => {});
+  }, [mapsUrl]);
 
   const handleSubmit = useCallback(async () => {
     if (submitting) return;
 
+    const trimmedName = name.trim();
     const trimmedPhone = phone.trim();
     const trimmedEmail = email.trim();
+    const trimmedSubject = subject.trim();
     const trimmedMessage = message.trim();
 
     const nextErrors: ContactErrors = {};
+    if (!trimmedName) nextErrors.name = 'Name is required.';
     if (!trimmedPhone) nextErrors.phone = 'Phone number is required.';
     if (!trimmedEmail) nextErrors.email = 'Email address is required.';
     else if (!EMAIL_REGEX.test(trimmedEmail)) nextErrors.email = 'Please enter a valid email address.';
+    if (!trimmedSubject) nextErrors.subject = 'Subject is required.';
     if (!trimmedMessage) nextErrors.message = 'Short message is required.';
     setErrors(nextErrors);
     setSubmitStatus(null);
@@ -69,12 +152,16 @@ export default function ContactScreen() {
     setSubmitting(true);
     try {
       await submitContact({
+        name: trimmedName,
         phone: trimmedPhone,
         email: trimmedEmail,
+        subject: trimmedSubject,
         message: trimmedMessage,
       });
+      setName('');
       setPhone('');
       setEmail('');
+      setSubject('');
       setMessage('');
       setErrors({});
       setSubmitStatus({ type: 'success', message: 'Thank you! Your message has been sent.' });
@@ -83,41 +170,20 @@ export default function ContactScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [email, message, phone, submitting]);
+  }, [EMAIL_REGEX, email, message, name, phone, subject, submitting]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
-      <View style={styles.tabBar}>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'Contact' && styles.tabActive]}
-          onPress={() => onTabChange('Contact')}
-          activeOpacity={0.8}
-        >
-          <Text style={[styles.tabLabel, activeTab === 'Contact' && styles.tabLabelActive]}>
-            Contact
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'Visit' && styles.tabActive]}
-          onPress={() => onTabChange('Visit')}
-          activeOpacity={0.8}
-        >
-          <Text style={[styles.tabLabel, activeTab === 'Visit' && styles.tabLabelActive]}>
-            Visit
-          </Text>
-        </TouchableOpacity>
-      </View>
       <View style={styles.content}>
-        {activeTab === 'Contact' ? (
-          showContactSkeleton ? (
-            <ScrollView
-              style={styles.scrollView}
-              contentContainerStyle={styles.scrollContent}
-              showsVerticalScrollIndicator={false}
-            >
-              <ContactScreenSkeleton />
-            </ScrollView>
-          ) : (
+        {showContactSkeleton ? (
+          <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <ContactScreenSkeleton />
+          </ScrollView>
+        ) : (
           <KeyboardAvoidingView
             style={styles.keyboardView}
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -125,85 +191,173 @@ export default function ContactScreen() {
           >
             <ScrollView
               style={styles.scrollView}
-              contentContainerStyle={styles.scrollContent}
+              contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 24 }]}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
-              <Text style={styles.title}>Contact Details</Text>
+              <Text style={styles.heroTitle}>Get in Touch</Text>
+              <Text style={styles.heroSubtitle}>
+                Whether you have a question about our menu or want to share feedback, we&apos;re here to listen.
+              </Text>
 
-              <Text style={styles.label}>Phone Number *</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="e.g. +1 234 567 8900"
-                placeholderTextColor={PLACEHOLDER_COLOR}
-                value={phone}
-                onChangeText={(v) => {
-                  setPhone(v);
-                  setErrors((prev) => ({ ...prev, phone: undefined }));
-                }}
-                keyboardType="phone-pad"
-                editable={!submitting}
-              />
-              {errors.phone ? <Text style={styles.fieldError}>{errors.phone}</Text> : null}
+              <View style={styles.formCard}>
+                <View style={styles.formGrid}>
+                  <View style={styles.fieldHalf}>
+                    <Text style={styles.label}>Enter Name</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Your Name"
+                      placeholderTextColor={PLACEHOLDER_COLOR}
+                      value={name}
+                      onChangeText={(v) => {
+                        setName(v);
+                        setErrors((prev) => ({ ...prev, name: undefined }));
+                      }}
+                      editable={!submitting}
+                    />
+                    {errors.name ? <Text style={styles.fieldError}>{errors.name}</Text> : null}
+                  </View>
+                  <View style={styles.fieldHalf}>
+                    <Text style={styles.label}>Phone Number</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Phone Number"
+                      placeholderTextColor={PLACEHOLDER_COLOR}
+                      value={phone}
+                      onChangeText={(v) => {
+                        setPhone(v);
+                        setErrors((prev) => ({ ...prev, phone: undefined }));
+                      }}
+                      keyboardType="phone-pad"
+                      editable={!submitting}
+                    />
+                    {errors.phone ? <Text style={styles.fieldError}>{errors.phone}</Text> : null}
+                  </View>
+                  <View style={styles.fieldHalf}>
+                    <Text style={styles.label}>Email Address</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Your Email"
+                      placeholderTextColor={PLACEHOLDER_COLOR}
+                      value={email}
+                      onChangeText={(v) => {
+                        setEmail(v);
+                        setErrors((prev) => ({ ...prev, email: undefined }));
+                      }}
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      editable={!submitting}
+                    />
+                    {errors.email ? <Text style={styles.fieldError}>{errors.email}</Text> : null}
+                  </View>
+                  <View style={styles.fieldHalf}>
+                    <Text style={styles.label}>Subject</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Subject"
+                      placeholderTextColor={PLACEHOLDER_COLOR}
+                      value={subject}
+                      onChangeText={(v) => {
+                        setSubject(v);
+                        setErrors((prev) => ({ ...prev, subject: undefined }));
+                      }}
+                      editable={!submitting}
+                    />
+                    {errors.subject ? <Text style={styles.fieldError}>{errors.subject}</Text> : null}
+                  </View>
+                </View>
 
-              <Text style={styles.label}>Email Address *</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="e.g. hello@example.com"
-                placeholderTextColor={PLACEHOLDER_COLOR}
-                value={email}
-                onChangeText={(v) => {
-                  setEmail(v);
-                  setErrors((prev) => ({ ...prev, email: undefined }));
-                }}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                editable={!submitting}
-              />
-              {errors.email ? <Text style={styles.fieldError}>{errors.email}</Text> : null}
+                <Text style={styles.label}>Message</Text>
+                <TextInput
+                  style={[styles.input, styles.messageInput]}
+                  placeholder="Message"
+                  placeholderTextColor={PLACEHOLDER_COLOR}
+                  value={message}
+                  onChangeText={(v) => {
+                    setMessage(v);
+                    setErrors((prev) => ({ ...prev, message: undefined }));
+                  }}
+                  multiline
+                  numberOfLines={6}
+                  textAlignVertical="top"
+                  editable={!submitting}
+                />
+                {errors.message ? <Text style={styles.fieldError}>{errors.message}</Text> : null}
 
-              <Text style={styles.label}>Short Message *</Text>
-              <TextInput
-                style={[styles.input, styles.messageInput]}
-                placeholder="Your message..."
-                placeholderTextColor={PLACEHOLDER_COLOR}
-                value={message}
-                onChangeText={(v) => {
-                  setMessage(v);
-                  setErrors((prev) => ({ ...prev, message: undefined }));
-                }}
-                multiline
-                numberOfLines={4}
-                textAlignVertical="top"
-                editable={!submitting}
-              />
-              {errors.message ? <Text style={styles.fieldError}>{errors.message}</Text> : null}
+                <Pressable
+                  style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
+                  onPress={handleSubmit}
+                  disabled={submitting}
+                >
+                  {submitting ? (
+                    <ActivityIndicator size="small" color={TAB_BG} />
+                  ) : (
+                    <Text style={styles.submitButtonText}>SEND MESSAGE</Text>
+                  )}
+                </Pressable>
+                {submitStatus ? (
+                  <Text
+                    style={[
+                      styles.submitStatus,
+                      submitStatus.type === 'success' ? styles.submitStatusSuccess : styles.submitStatusError,
+                    ]}
+                  >
+                    {submitStatus.message}
+                  </Text>
+                ) : null}
+              </View>
 
-              <Pressable
-                style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
-                onPress={handleSubmit}
-                disabled={submitting}
-              >
-                {submitting ? (
-                  <ActivityIndicator size="small" color={TAB_BG} />
+              <Text style={styles.visitTitle}>Visit Us</Text>
+              <View style={styles.visitCard}>
+                {visitLoading ? (
+                  <Text style={styles.visitMuted}>Loading location…</Text>
+                ) : visitError ? (
+                  <Text style={styles.visitMuted}>{visitError}</Text>
                 ) : (
-                  <Text style={styles.submitButtonText}>Submit</Text>
+                  <>
+                    <View style={styles.mapContainer}>
+                      <WebView
+                        source={{ html: mapHtml }}
+                        style={[styles.map, { width: MAP_WIDTH, height: MAP_HEIGHT }]}
+                        javaScriptEnabled
+                        domStorageEnabled
+                        originWhitelist={['*']}
+                        mixedContentMode="compatibility"
+                        scrollEnabled={false}
+                      />
+                    </View>
+                    <Pressable style={styles.mapLink} onPress={handleOpenMap}>
+                      <Text style={styles.mapLinkText}>View larger map</Text>
+                    </Pressable>
+
+                    <View style={styles.visitMeta}>
+                      <Text style={styles.visitName}>{location?.name || 'Mexicano'}</Text>
+                      <Text style={styles.visitAddress} numberOfLines={3}>
+                        {[location?.address, location?.city, location?.state, location?.zip].filter(Boolean).join(', ') || '—'}
+                      </Text>
+                    </View>
+
+                    <View style={styles.hoursBox}>
+                      <Text style={styles.hoursTitle}>Timing</Text>
+                      {DAYS_ORDER.map((day) => {
+                        const dayHours = hours?.[day];
+                        const isOpen = dayHours?.isOpen ?? false;
+                        return (
+                          <View key={day} style={styles.hoursRow}>
+                            <Text style={styles.hoursDay}>{day}</Text>
+                            <Text style={styles.hoursTime}>
+                              {isOpen ? formatHours(dayHours) : 'Closed'}
+                            </Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </>
                 )}
-              </Pressable>
-              {submitStatus ? (
-                <Text style={[styles.submitStatus, submitStatus.type === 'success' ? styles.submitStatusSuccess : styles.submitStatusError]}>
-                  {submitStatus.message}
-                </Text>
-              ) : null}
+              </View>
             </ScrollView>
           </KeyboardAvoidingView>
-          )
-        ) : null}
-        {hasOpenedVisit || activeTab === 'Visit' ? (
-          <View style={activeTab === 'Visit' ? styles.visitTabVisible : styles.visitTabHidden} pointerEvents={activeTab === 'Visit' ? 'auto' : 'none'}>
-            <VisitScreen />
-          </View>
-        ) : null}
+        )}
       </View>
     </SafeAreaView>
   );
@@ -214,40 +368,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: TAB_BG,
   },
-  tabBar: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(0,0,0,0.2)',
-    paddingHorizontal: 6,
-    paddingVertical: 4,
-    gap: 6,
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 6,
-  },
-  tabActive: {
-    backgroundColor: 'rgba(255, 193, 7, 0.2)',
-  },
-  tabLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: INACTIVE,
-  },
-  tabLabelActive: {
-    color: ACTIVE,
-  },
   content: {
     flex: 1,
     backgroundColor: BG_DARK,
-  },
-  visitTabVisible: {
-    flex: 1,
-  },
-  visitTabHidden: {
-    display: 'none',
   },
   scrollView: {
     flex: 1,
@@ -257,14 +380,36 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 24,
   },
-  title: {
-    fontSize: 18,
-    fontWeight: '700',
+  heroTitle: {
+    fontSize: 22,
+    fontWeight: '800',
     color: INACTIVE,
-    marginBottom: 12,
+    marginBottom: 6,
+  },
+  heroSubtitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.65)',
+    marginBottom: 16,
+    lineHeight: 18,
   },
   keyboardView: {
     flex: 1,
+  },
+  formCard: {
+    backgroundColor: BG_DARK,
+    borderRadius: 14,
+    padding: 0,
+    marginBottom: 18,
+  },
+  formGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  fieldHalf: {
+    width: '48%',
   },
   label: {
     fontSize: 12,
@@ -291,7 +436,7 @@ const styles = StyleSheet.create({
     color: 'rgba(239, 68, 68, 0.95)',
   },
   messageInput: {
-    minHeight: 80,
+    minHeight: 140,
     paddingTop: 10,
   },
   submitButton: {
@@ -323,5 +468,90 @@ const styles = StyleSheet.create({
   },
   submitStatusError: {
     color: 'rgba(239, 68, 68, 0.95)',
+  },
+  visitTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: INACTIVE,
+    marginBottom: 10,
+    marginTop: 8,
+  },
+  visitCard: {
+    backgroundColor: TAB_BG,
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(229,185,72,0.22)',
+    marginBottom: 24,
+  },
+  visitMuted: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.8)',
+  },
+  mapContainer: {
+    height: MAP_HEIGHT,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(229,185,72,0.18)',
+    backgroundColor: CARD_BG,
+  },
+  map: {
+    backgroundColor: CARD_BG,
+  },
+  mapLink: {
+    marginTop: 8,
+    alignSelf: 'flex-start',
+  },
+  mapLinkText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: ACTIVE,
+  },
+  visitMeta: {
+    marginTop: 12,
+  },
+  visitName: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: INACTIVE,
+    marginBottom: 4,
+  },
+  visitAddress: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.75)',
+    lineHeight: 16,
+  },
+  hoursBox: {
+    marginTop: 14,
+    backgroundColor: BG_DARK,
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(229,185,72,0.14)',
+  },
+  hoursTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: INACTIVE,
+    marginBottom: 8,
+  },
+  hoursRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+  },
+  hoursDay: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.85)',
+  },
+  hoursTime: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.75)',
   },
 });

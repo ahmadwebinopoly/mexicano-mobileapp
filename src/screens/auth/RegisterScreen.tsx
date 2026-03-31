@@ -11,11 +11,13 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import type { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { register as registerApi, login as loginApi } from '../../api/auth';
 import { getCurrentUser } from '../../api/profile';
 import { registerForPushNotifications } from '../../services/pushNotifications';
+import type { RootStackParamList } from '../../navigation/RootNavigator';
 
 const BG_DARK = '#0B1D1B';
 const CARD_BG = '#152C29';
@@ -30,6 +32,8 @@ const PHONE_REGEX = /^[+]?[\d\s\-()]{7,20}$/;
 export default function RegisterScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
+  const route = useRoute<RouteProp<RootStackParamList, 'Register'>>();
+  const returnTo = route.params?.returnTo;
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
@@ -54,7 +58,15 @@ export default function RegisterScreen() {
         user = await getCurrentUser();
       }
       if (user) void registerForPushNotifications();
-      navigation.getParent()?.goBack();
+      if (returnTo === 'Checkout') {
+        navigation.reset({
+          index: 1,
+          routes: [{ name: 'Main' }, { name: 'Checkout' }],
+        });
+        return;
+      }
+      if (navigation.canGoBack?.()) navigation.goBack();
+      else navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
     } catch {
       /* keep on screen */
     } finally {
@@ -161,7 +173,7 @@ export default function RegisterScreen() {
 
           <Pressable
             style={styles.signInLinkWrap}
-            onPress={() => navigation.navigate('Login')}
+            onPress={() => navigation.navigate('Login', returnTo ? { returnTo } : undefined)}
             hitSlop={8}
             accessibilityRole="link"
             accessibilityLabel="Already have an account? Sign in"

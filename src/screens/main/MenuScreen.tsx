@@ -249,6 +249,7 @@ export default function MenuScreen() {
   const insets = useSafeAreaInsets();
   const { addItem, items: cartItems } = useCart();
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [menuProducts, setMenuProducts] = useState<MenuProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -257,6 +258,7 @@ export default function MenuScreen() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [wishlistIds, setWishlistIds] = useState<Set<string>>(new Set());
   const [ratingById, setRatingById] = useState<Record<string, { avg: number; count: number }>>({});
+  const lastWishlistLoadedAtRef = useRef(0);
 
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const toastOpacity = useRef(new Animated.Value(0)).current;
@@ -275,11 +277,16 @@ export default function MenuScreen() {
     setToast({ message, type });
   }, []);
 
-  const loadWishlistIds = useCallback(async () => {
+  const loadWishlistIds = useCallback(async (opts?: { force?: boolean }) => {
     try {
       const token = await getToken();
       if (!token) {
         setWishlistIds(new Set());
+        lastWishlistLoadedAtRef.current = 0;
+        return;
+      }
+      const now = Date.now();
+      if (!opts?.force && lastWishlistLoadedAtRef.current && now - lastWishlistLoadedAtRef.current < 30_000) {
         return;
       }
       const data = await getWishlist();
@@ -293,8 +300,10 @@ export default function MenuScreen() {
         if (rawId != null) ids.add(String(rawId));
       });
       setWishlistIds(ids);
+      lastWishlistLoadedAtRef.current = Date.now();
     } catch {
       setWishlistIds(new Set());
+      lastWishlistLoadedAtRef.current = 0;
     }
   }, []);
 
@@ -307,6 +316,12 @@ export default function MenuScreen() {
       })();
     }, [loadWishlistIds])
   );
+
+  // Debounce search to reduce filter work while typing.
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedSearchQuery(searchQuery), 180);
+    return () => clearTimeout(id);
+  }, [searchQuery]);
 
   const handleItemPress = useCallback((item: MenuProduct) => {
     navigation.getParent()?.navigate('ItemDetail', { item: item as unknown as ItemDetailParamItem });
@@ -454,14 +469,14 @@ export default function MenuScreen() {
         ? { ...p, ratingValue: stat.avg, reviewsCount: stat.count }
         : { ...p, ratingValue: null, reviewsCount: null };
     });
-    const q = normalizeSearchText(searchQuery);
+    const q = normalizeSearchText(debouncedSearchQuery);
     if (!q) return base;
     return base.filter(
       (p) =>
         normalizeSearchText(p.name).includes(q) ||
         normalizeSearchText(p.description).includes(q)
     );
-  }, [menuProducts, searchQuery, ratingById]);
+  }, [menuProducts, debouncedSearchQuery, ratingById]);
 
   const renderProductItem = useCallback(
     ({ item }: { item: MenuProduct }) => {
@@ -510,10 +525,11 @@ export default function MenuScreen() {
         data={!loading && !error ? filteredProducts : []}
         keyExtractor={keyExtractor}
         renderItem={renderProductItem}
-        initialNumToRender={6}
-        maxToRenderPerBatch={8}
-        windowSize={7}
         removeClippedSubviews
+        windowSize={9}
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        updateCellsBatchingPeriod={50}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={(

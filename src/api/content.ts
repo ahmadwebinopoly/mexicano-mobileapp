@@ -116,8 +116,10 @@ export async function getContact(): Promise<ContactContent> {
 }
 
 export interface ContactSubmitPayload {
+  name?: string;
   phone?: string;
   email?: string;
+  subject?: string;
   message?: string;
 }
 

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -109,16 +109,16 @@ export default function AddressScreen() {
     setRefreshing(false);
   };
 
-  const handleSetDefault = async (id: string) => {
+  const handleSetDefault = useCallback(async (id: string) => {
     try {
       await setAddressAsDefault(id);
       await fetchAddresses();
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to set default.');
     }
-  };
+  }, [fetchAddresses]);
 
-  const handleDelete = (id: string) => {
+  const handleDelete = useCallback((id: string) => {
     Alert.alert(
       'Delete Address',
       'Are you sure you want to delete this address?',
@@ -138,10 +138,10 @@ export default function AddressScreen() {
         },
       ]
     );
-  };
+  }, [fetchAddresses]);
 
   // Edit Modal Functions
-  const openEditModal = (addr: Address) => {
+  const openEditModal = useCallback((addr: Address) => {
     setEditingAddress(addr);
     setEditAddress(addr.address || '');
     setEditCity(addr.city || '');
@@ -152,12 +152,12 @@ export default function AddressScreen() {
     setEditLabel(addr.customerLocation || 'Home');
     setEditErrors({});
     setEditModalVisible(true);
-  };
+  }, []);
 
-  const closeEditModal = () => {
+  const closeEditModal = useCallback(() => {
     setEditModalVisible(false);
     setEditingAddress(null);
-  };
+  }, []);
 
   const handleSaveEdit = async () => {
     if (!editingAddress) return;
@@ -208,9 +208,14 @@ export default function AddressScreen() {
     setAddModalVisible(true);
   }, []);
 
-  const closeAddModal = () => {
+  const closeAddModal = useCallback(() => {
     setAddModalVisible(false);
-  };
+  }, []);
+
+  const sortedAddresses = useMemo(() => {
+    const list = Array.isArray(addresses) ? [...addresses] : [];
+    return list.sort((a, b) => (a.isDefault === b.isDefault ? 0 : a.isDefault ? -1 : 1));
+  }, [addresses]);
 
   // If navigated from Checkout delivery picker:
   // `navigation.navigate('Address', { openAddModal: true })`
@@ -493,7 +498,7 @@ export default function AddressScreen() {
         ) : addresses.length === 0 ? (
           renderEmptyState()
         ) : (
-          addresses.map(renderAddressCard)
+          sortedAddresses.map(renderAddressCard)
         )}
       </ScrollView>
 

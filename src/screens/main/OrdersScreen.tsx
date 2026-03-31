@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,11 +11,12 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { getMyOrders, startOrdersPolling, stopOrdersPolling, type Order } from '../../api/myorder';
+import { getMyOrders, type Order } from '../../api/myorder';
 import { getNetworkErrorMessage } from '../../api/apiConfig';
 import { getToken } from '../../storagetank';
 import { navigateToLoginRegister } from '../../navigation/rootNavigationRef';
 import { OrdersScreenSkeleton } from '../../components/skeleton';
+import * as Notifications from 'expo-notifications';
 
 const TOAST_DURATION = 2800;
 
@@ -56,6 +57,22 @@ export default function OrdersScreen() {
     setToast({ message, type });
   };
 
+  const refreshOrdersOnce = useCallback(async () => {
+    const token = await getToken();
+    if (!token) {
+      setIsAuthenticated(false);
+      setCurrentOrders([]);
+      setHistoryOrders([]);
+      setLoading(false);
+      return;
+    }
+    setIsAuthenticated(true);
+    const response = await getMyOrders();
+    setCurrentOrders(response.current);
+    setHistoryOrders(response.history);
+    setLoading(false);
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       const showOrderSuccess = route.params?.showOrderSuccessToast;
@@ -75,61 +92,39 @@ export default function OrdersScreen() {
     useCallback(() => {
       let isMounted = true;
 
-      const startPolling = async () => {
-        const token = await getToken();
-        if (!token) {
+      void refreshOrdersOnce().catch((e) => {
+        if (!isMounted) return;
+        const msg = getNetworkErrorMessage(e);
+        if (msg.includes('Not authenticated')) {
           setIsAuthenticated(false);
           setCurrentOrders([]);
           setHistoryOrders([]);
-          setLoading(false);
-          return;
+        } else {
+          showToast(msg, 'error');
         }
-        setIsAuthenticated(true);
-
-        startOrdersPolling(
-          (data) => {
-            if (isMounted) {
-              setCurrentOrders(data.current);
-              setHistoryOrders(data.history);
-              setLoading(false);
-            }
-          },
-          (error) => {
-            if (isMounted) {
-              console.log('[OrdersScreen] Polling error:', error.message);
-              if (error.message.includes('Not authenticated')) {
-                setIsAuthenticated(false);
-                stopOrdersPolling();
-              }
-              setLoading(false);
-            }
-          },
-          2000,
-        );
-      };
-
-      void startPolling();
+        setLoading(false);
+      });
 
       return () => {
         isMounted = false;
-        stopOrdersPolling();
       };
-    }, [])
+    }, [refreshOrdersOnce])
   );
+
+  // Push-driven refresh (no 2s polling)
+  useEffect(() => {
+    const sub = Notifications.addNotificationReceivedListener((notification) => {
+      const data = (notification as any)?.request?.content?.data ?? {};
+      if (String((data as any)?.type ?? '') !== 'order_status') return;
+      void refreshOrdersOnce().catch(() => {});
+    });
+    return () => sub.remove();
+  }, [refreshOrdersOnce]);
 
   const onRefresh = async () => {
     setRefreshing(true);
     try {
-      const token = await getToken();
-      if (!token) {
-        setIsAuthenticated(false);
-        setCurrentOrders([]);
-        setHistoryOrders([]);
-        return;
-      }
-      const response = await getMyOrders();
-      setCurrentOrders(response.current);
-      setHistoryOrders(response.history);
+      await refreshOrdersOnce();
     } catch (e) {
       const msg = getNetworkErrorMessage(e);
       if (!msg.includes('Not authenticated')) {
@@ -140,7 +135,8 @@ export default function OrdersScreen() {
     }
   };
 
-  const orders =
+  const orders = useMemo(
+    () =>
     activeTab === 'current'
       ? currentOrders
       : activeTab === 'history'
@@ -149,7 +145,9 @@ export default function OrdersScreen() {
             const ta = new Date(a.date || a.createdAt).getTime();
             const tb = new Date(b.date || b.createdAt).getTime();
             return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
-          });
+          }),
+    [activeTab, currentOrders, historyOrders]
+  );
 
   const formatDate = (dateStr: string) => {
     try {
@@ -224,7 +222,7 @@ export default function OrdersScreen() {
     </View>
   );
 
-  const renderOrderCard = (order: Order) => (
+  const renderOrderCard = useCallback((order: Order) => (
     <View
       key={order.id}
       style={styles.orderCard}
@@ -270,7 +268,7 @@ export default function OrdersScreen() {
         </Pressable>
       </View>
     </View>
-  );
+  ), [navigation]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
