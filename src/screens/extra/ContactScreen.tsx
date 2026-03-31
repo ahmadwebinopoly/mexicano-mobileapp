@@ -366,7 +366,7 @@ export default function ContactScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: TAB_BG,
+    backgroundColor: BG_DARK,
   },
   content: {
     flex: 1,
@@ -477,7 +477,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   visitCard: {
-    backgroundColor: TAB_BG,
+    backgroundColor: BG_DARK,
     borderRadius: 14,
     padding: 16,
     borderWidth: 1,
