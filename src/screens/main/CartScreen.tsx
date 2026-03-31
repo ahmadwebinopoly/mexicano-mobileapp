@@ -10,10 +10,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useCart, type CartItem } from '../../contexts/CartContext';
 import { CartScreenSkeleton } from '../../components/skeleton';
 import type { ItemDetailParamItem } from './ItemDetailScreen';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getAddress } from '../../api/saveadresss';
+import { getVisit } from '../../api/content';
 
 const BG_DARK = '#0B1D1B';
 const CARD_BG = '#152C29';
@@ -22,6 +25,9 @@ const TEXT_WHITE = '#FFFFFF';
 const MUTED_TEXT = 'rgba(255,255,255,0.7)';
 const SEARCH_BG = '#1F403C';
 const HORIZONTAL_PADDING = 20;
+const ONBOARDING_ORDER_MODE_KEY = 'onboarding_order_mode';
+
+type OrderMode = 'delivery' | 'dining' | 'takeaway';
 
 function formatPrice(price: string): string {
   if (price == null || String(price).trim() === '') return '$0.00';
@@ -62,11 +68,48 @@ export default function CartScreen() {
   const navigation = useNavigation<any>();
   const { items, removeItem, updateQuantity, total } = useCart();
   const [showSkeleton, setShowSkeleton] = useState(true);
+  const [headerSubtitle, setHeaderSubtitle] = useState('');
 
   useEffect(() => {
     const t = setTimeout(() => setShowSkeleton(false), 400);
     return () => clearTimeout(t);
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      (async () => {
+        try {
+          const raw = await AsyncStorage.getItem(ONBOARDING_ORDER_MODE_KEY);
+          const mode: OrderMode =
+            raw === 'delivery' || raw === 'dining' || raw === 'takeaway' ? raw : 'delivery';
+
+          if (mode === 'delivery') {
+            const addr = await getAddress();
+            if (!active) return;
+            const label = String(addr?.customerLocation ?? '').trim();
+            const city = String(addr?.city ?? '').trim();
+            const line = city || String(addr?.address ?? '').trim();
+            const subtitle = [label || 'Delivery', line].filter(Boolean).join(' - ');
+            setHeaderSubtitle(subtitle);
+            return;
+          }
+
+          const visit = await getVisit();
+          if (!active) return;
+          const name = String(visit?.location?.name ?? '').trim() || 'Restaurant';
+          const city = String(visit?.location?.city ?? '').trim();
+          const subtitle = [name, city].filter(Boolean).join(' - ');
+          setHeaderSubtitle(subtitle);
+        } catch {
+          if (active) setHeaderSubtitle('');
+        }
+      })();
+      return () => {
+        active = false;
+      };
+    }, [])
+  );
 
   const cartRows = useMemo(() => {
     return items.map((cartItem) => ({
@@ -210,10 +253,17 @@ export default function CartScreen() {
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
       {/* Header */}
       <View style={styles.header}>
-        <Pressable style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={20} color={BG_DARK} />
+        <Pressable style={styles.backButton} onPress={() => navigation.goBack()} accessibilityLabel="Go back">
+          <Ionicons name="chevron-back" size={22} color={BG_DARK} />
         </Pressable>
-        <Text style={styles.headerTitle}>Cart</Text>
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle}>Cart</Text>
+          {headerSubtitle ? (
+            <Text style={styles.headerSubtitle} numberOfLines={1}>
+              {headerSubtitle}
+            </Text>
+          ) : null}
+        </View>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -285,11 +335,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerTitle: {
-    flex: 1,
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '700',
     color: TEXT_WHITE,
     textAlign: 'center',
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 0,
+    paddingHorizontal: 10,
+  },
+  headerSubtitle: {
+    marginTop: 2,
+    fontSize: 14,
+    fontWeight: '600',
+    color: MUTED_TEXT,
   },
   headerSpacer: {
     width: 32,

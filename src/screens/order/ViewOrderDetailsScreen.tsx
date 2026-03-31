@@ -470,10 +470,35 @@ export default function ViewOrderDetailsScreen() {
 
   const parsedOrderLines = useMemo(() => parseOrderItemLines(order?.items || ''), [order?.items]);
 
+  const menuImageUriByName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of menuCatalog) {
+      const name = String(m.name ?? '').trim().toLowerCase();
+      if (!name) continue;
+      const uri = extractMenuImageUri((m as any).image);
+      if (uri) map.set(name, uri);
+    }
+    return map;
+  }, [menuCatalog]);
+
   const lineImageUris = useMemo(
-    () => parsedOrderLines.map((line) => resolveMenuImageUri(menuCatalog, line.title)),
-    [parsedOrderLines, menuCatalog]
+    () => {
+      return parsedOrderLines.map((line) => {
+        const full = String(line.title ?? '').trim().toLowerCase();
+        const base = baseProductNameFromOrderLine(String(line.title ?? '')).trim().toLowerCase();
+        return menuImageUriByName.get(full) || menuImageUriByName.get(base) || '';
+      });
+    },
+    [menuImageUriByName, parsedOrderLines]
   );
+
+  useEffect(() => {
+    // Warm image cache to reduce visible pop-in when list renders.
+    const unique = Array.from(new Set(lineImageUris.filter(Boolean)));
+    unique.forEach((uri) => {
+      Image.prefetch(uri).catch(() => {});
+    });
+  }, [lineImageUris]);
 
   const lineTotals = useMemo(
     () => parsedOrderLines.map((line) => computeLineTotal(menuCatalog, line)),
