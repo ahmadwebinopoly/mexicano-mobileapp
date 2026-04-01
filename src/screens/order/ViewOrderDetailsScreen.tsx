@@ -294,7 +294,6 @@ function buildMapHtml(embedUrl: string): string {
 }
 
 type ProgressStep = { key: string; label: string };
-
 /** Dots align with labels: each step is a column (track + label). */
 function StatusProgressLine({
   steps,

@@ -43,6 +43,32 @@ function pickFirst(obj: Record<string, unknown>, keys: string[]): unknown {
   return undefined;
 }
 
+function pickFirstDeep(obj: Record<string, unknown>, keys: string[]): unknown {
+  const direct = pickFirst(obj, keys);
+  if (direct !== undefined) return direct;
+
+  // Look one level deep (common shapes: { discount: {...} }, { payload: {...} }, etc.)
+  for (const v of Object.values(obj)) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const hit = pickFirst(v as Record<string, unknown>, keys);
+      if (hit !== undefined) return hit;
+    }
+  }
+
+  // Look two levels deep (common shapes: { data: { discount: {...} } })
+  for (const v of Object.values(obj)) {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) continue;
+    for (const v2 of Object.values(v as Record<string, unknown>)) {
+      if (v2 && typeof v2 === 'object' && !Array.isArray(v2)) {
+        const hit2 = pickFirst(v2 as Record<string, unknown>, keys);
+        if (hit2 !== undefined) return hit2;
+      }
+    }
+  }
+
+  return undefined;
+}
+
 /** Flatten root + data + result so backend can put fields at any level. */
 function mergeDiscountResponse(json: Record<string, unknown>): Record<string, unknown> {
   const merged: Record<string, unknown> = { ...json };
@@ -146,16 +172,16 @@ export async function applyDiscount(payload: ApplyDiscountPayload): Promise<Appl
 
   const merged = mergeDiscountResponse(json);
 
-  const validRaw = pickFirst(merged, ['valid', 'isValid', 'ok', 'success']);
-  const statusRaw = pickFirst(merged, ['status', 'state']);
+  const validRaw = pickFirstDeep(merged, ['valid', 'isValid', 'ok', 'success']);
+  const statusRaw = pickFirstDeep(merged, ['status', 'state']);
   const statusOk =
     typeof statusRaw === 'string' && /^(success|ok|applied|valid)$/i.test(String(statusRaw).trim());
 
   const subtotalNum = parseMoney(payload.subtotal) ?? 0;
 
-  const discountAmount =
+  let discountAmount =
     parseMoney(
-      pickFirst(merged, [
+      pickFirstDeep(merged, [
         'discountAmount',
         'discount_amount',
         'amountOff',
@@ -171,7 +197,7 @@ export async function applyDiscount(payload: ApplyDiscountPayload): Promise<Appl
     ) ?? 0;
 
   let finalAmount = parseMoney(
-    pickFirst(merged, [
+    pickFirstDeep(merged, [
       'finalAmount',
       'final_amount',
       'totalAfterDiscount',
@@ -194,14 +220,27 @@ export async function applyDiscount(payload: ApplyDiscountPayload): Promise<Appl
   );
   // Some APIs use "total" for the amount after discount; avoid using it when it equals subtotal with no discount parsed.
   if (finalAmount == null) {
-    const totalRaw = parseMoney(pickFirst(merged, ['total', 'orderTotal', 'order_total']));
+    const totalRaw = parseMoney(pickFirstDeep(merged, ['total', 'orderTotal', 'order_total']));
     if (totalRaw != null && (discountAmount > 0.0005 || Math.abs(totalRaw - subtotalNum) > 0.0005)) {
       finalAmount = totalRaw;
     }
   }
 
-  const value = parseMoney(pickFirst(merged, ['value', 'discountValue', 'discount_value'])) ?? undefined;
-  const discountTypeRaw = pickFirst(merged, ['discountType', 'discount_type', 'type']);
+  const value =
+    parseMoney(
+      pickFirstDeep(merged, ['value', 'discountValue', 'discount_value', 'percent', 'percentage', 'amount', 'amountOff'])
+    ) ?? undefined;
+  const discountTypeRaw = pickFirstDeep(merged, ['discountType', 'discount_type', 'type', 'mode', 'kind']);
+
+  const discountType =
+    typeof discountTypeRaw === 'string'
+      ? String(discountTypeRaw).trim()
+      : discountTypeRaw == null
+        ? ''
+        : String(discountTypeRaw);
+
+  const typeLooksPercent = /percent|percentage|pct/i.test(discountType);
+  const typeLooksFixed = /fixed|amount|flat|cash/i.test(discountType);
 
   const hasExplicitValid =
     validRaw === true || validRaw === 1 || validRaw === 'true' || validRaw === '1';
@@ -214,22 +253,36 @@ export async function applyDiscount(payload: ApplyDiscountPayload): Promise<Appl
 
   if (!valid) {
     const msg =
-      (typeof pickFirst(merged, ['message', 'error']) === 'string' &&
-        String(pickFirst(merged, ['message', 'error']))) ||
+      (typeof pickFirstDeep(merged, ['message', 'error']) === 'string' &&
+        String(pickFirstDeep(merged, ['message', 'error']))) ||
       (typeof json.message === 'string' && json.message) ||
       (typeof json.error === 'string' && json.error) ||
       'This discount code cannot be applied.';
     throw new Error(msg);
   }
 
-  const final =
-    finalAmount != null
-      ? finalAmount
-      : Math.max(0, subtotalNum - discountAmount);
+  // Fallback: some backends only return { type, value } but not computed amounts.
+  const needsCompute =
+    (finalAmount == null && discountAmount <= 0.0005) ||
+    (finalAmount != null && Math.abs(finalAmount - subtotalNum) <= 0.0005 && discountAmount <= 0.0005);
+  if (needsCompute && value != null && value > 0) {
+    let computed = 0;
+    if (typeLooksPercent || (!typeLooksFixed && value > 0 && value <= 100 && value % 1 === 0)) {
+      computed = (subtotalNum * value) / 100;
+    } else {
+      computed = value;
+    }
+    if (computed > 0) {
+      discountAmount = computed;
+      finalAmount = Math.max(0, subtotalNum - computed);
+    }
+  }
+
+  const final = finalAmount != null ? finalAmount : Math.max(0, subtotalNum - discountAmount);
 
   return {
     valid: true,
-    discountType: typeof discountTypeRaw === 'string' ? discountTypeRaw : undefined,
+    discountType: discountType ? discountType : undefined,
     value,
     discountAmount,
     finalAmount: final,

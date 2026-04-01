@@ -1241,6 +1241,8 @@ export default function CheckoutScreen() {
           style={[
             styles.toast,
             toast.type === 'success' ? styles.toastSuccess : styles.toastError,
+            // Keep the toast above the fixed footer (total + place order)
+            { bottom: insets.bottom + 82 },
             { opacity: toastOpacity },
           ]}
         >
@@ -2152,7 +2154,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 20,
     right: 20,
-    bottom: 28,
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
