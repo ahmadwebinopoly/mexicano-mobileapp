@@ -820,7 +820,7 @@ export default function CheckoutScreen() {
                   <Ionicons name="card" size={24} color={paymentMethod === 'stripe' ? BG_DARK : GOLD} />
                 </View>
                 <View>
-                  <Text style={styles.paymentOptionTitle}>Pay with Stripe</Text>
+                  <Text style={styles.paymentOptionTitle}>Pay with debit card/Text>
                   <Text style={styles.paymentOptionSub}>Credit / debit card</Text>
                 </View>
               </View>
